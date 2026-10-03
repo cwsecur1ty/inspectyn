@@ -1,0 +1,18 @@
+[
+  {
+    "asset": "https://preview.example.com",
+    "vendor": "Example vendor",
+    "product": "Example service",
+    "version": "2.4.0",
+    "source": "Fictional inventory export",
+    "observedAt": "2026-09-18T10:00:00Z"
+  },
+  {
+    "asset": "https://app.example.com",
+    "vendor": "Example vendor",
+    "product": "Example service",
+    "version": "2.5.0",
+    "source": "Fictional inventory export",
+    "observedAt": "2026-09-18T10:00:00Z"
+  }
+]

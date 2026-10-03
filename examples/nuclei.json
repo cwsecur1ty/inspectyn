@@ -1,0 +1,26 @@
+[
+  {
+    "template-id": "sample-product-advisory",
+    "info": {
+      "name": "Sample product advisory candidate",
+      "severity": "high",
+      "classification": {
+        "cve-id": [
+          "CVE-2024-27199"
+        ]
+      }
+    },
+    "host": "https://preview.example.com",
+    "matcher-status": true,
+    "timestamp": "2026-09-17T10:00:00Z"
+  },
+  {
+    "template-id": "sample-header-review",
+    "info": {
+      "name": "Sample response-header observation",
+      "severity": "info"
+    },
+    "host": "https://app.example.com",
+    "matcher-status": true
+  }
+]

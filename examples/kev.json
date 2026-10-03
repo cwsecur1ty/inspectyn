@@ -1,0 +1,9 @@
+{
+  "catalogVersion": "sample-fixture",
+  "dateReleased": "2026-09-17",
+  "vulnerabilities": [
+    {
+      "cveID": "CVE-2024-27199"
+    }
+  ]
+}

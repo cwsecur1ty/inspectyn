@@ -1,0 +1,11 @@
+[
+  {
+    "url": "https://app.example.com",
+    "observedAt": "2026-09-17T10:00:00Z",
+    "headers": {
+      "Content-Type": "text/html; charset=utf-8",
+      "Content-Security-Policy-Report-Only": "default-src 'self'",
+      "X-Content-Type-Options": "nosniff"
+    }
+  }
+]

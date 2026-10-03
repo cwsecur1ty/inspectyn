@@ -1,0 +1,29 @@
+{
+  "dataType": "CVE_RECORD",
+  "dataVersion": "5.1",
+  "cveMetadata": {
+    "cveId": "CVE-2099-10000",
+    "state": "PUBLISHED",
+    "dateUpdated": "2026-09-18T09:00:00Z"
+  },
+  "containers": {
+    "cna": {
+      "affected": [
+        {
+          "vendor": "Example vendor",
+          "product": "Example service",
+          "versions": [
+            {
+              "version": "2.4.0",
+              "status": "affected"
+            },
+            {
+              "version": "2.5.0",
+              "status": "unaffected"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
