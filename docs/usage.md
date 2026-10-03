@@ -1,16 +1,17 @@
 # Usage
 
-Commands below use the installed `spectyn` command. Without a global installation, replace it with `node bin/spectyn.mjs` from the repository root.
+Version 0.2.0 provides two commands:
+
+- `inspectyn`: native Go executable for `scan`, `recon`, and `init`. No Node.js runtime is required.
+- `inspectyn-js`: optional Node.js command for offline `review` and saved `report` rendering. Requires Node.js 22.13 or later.
 
 ## Configuration
 
-Create a configuration file:
-
 ```sh
-spectyn init --target https://your-domain.com --out spectyn.json
+inspectyn init --target https://your-domain.com --out inspectyn.json
 ```
 
-`init` makes no network requests. Running it without `--target` creates an empty target list to edit before scanning.
+`init` writes configuration without making network requests. Omit `--target` to create an empty target list for editing.
 
 ```json
 {
@@ -21,43 +22,83 @@ spectyn init --target https://your-domain.com --out spectyn.json
 }
 ```
 
-| Field | Accepted values |
+| Field | Values |
 | --- | --- |
-| `schemaVersion` | `1` |
-| `targets` | 1–20 distinct public HTTPS URLs on port 443 |
-| `dns` | `true` by default; `false` skips mail-policy queries |
-| `timeoutMs` | 1,000–30,000 milliseconds per DNS/HTTPS phase; default 10,000 |
-
-Targets require fully qualified DNS hostnames. IP literals, wildcards, credentials, query strings, and fragments are rejected. URL paths are supported. DNS address resolution is still required when `dns` is `false`.
+| `schemaVersion` | Required; must be `1` |
+| `targets` | 1–20 distinct targets |
+| `dns` | Defaults to `true`; `false` skips SPF, DMARC, and MX queries |
+| `timeoutMs` | 1,000–30,000 milliseconds per DNS/HTTPS phase; defaults to 10,000 |
 
 ```sh
-spectyn scan --config spectyn.json --format json --out scan.json
+inspectyn scan --config inspectyn.json --concurrency 4 --format json --out scan.json
 ```
 
-Targets are processed sequentially. For each target, Spectyn resolves its addresses, checks that every returned address is public, and pins one HTTPS connection to a selected address. It verifies the TLS certificate and hostname, reads one response, and closes the connection without analyzing the body. Redirects are reported but not followed. The header limit is 32 KiB. Timeouts apply to individual phases, not to the entire scan.
+`--timeout-ms` overrides the configured timeout. `--no-dns` skips mail-policy queries even when `dns` is `true`. Address lookups still run. Concurrency is a command-line option, not a JSON field: it accepts `1–16` and defaults to `4`. Checks for different hosts can run concurrently; checks for the same hostname are serialized.
+
+### Target files
+
+Use `--list targets.txt` instead of `--target` or `--config`. Files must be UTF-8, with one target per line. Blank lines and lines beginning with `#` are ignored. At most 20 targets are accepted, and the file limit is 64 KiB.
+
+```text
+https://your-domain.com/
+https://api.your-domain.com/health
+```
+
+For DNS recon, entries can be hostnames or HTTPS origins without paths:
+
+```sh
+inspectyn recon --list domains.txt --concurrency 4 --format json --out dns.json
+```
+
+### HTTPS scanning
+
+```sh
+inspectyn scan -u https://your-domain.com --format text
+```
+
+Scan targets must be HTTPS URLs on port 443 with fully qualified ASCII DNS hostnames. Use punycode for international domain names. IP literals, wildcards, credentials, query strings, and fragments are rejected. Endpoint paths are supported.
+
+For each target, Inspectyn resolves its addresses, checks that every returned address is public, and pins one HTTPS connection to a selected address. It verifies the certificate and hostname, reads one response, then closes the connection without analyzing the body. It does not follow redirects. Response headers are capped at 32 KiB. Timeouts apply per DNS/HTTPS phase, not to the entire scan.
+
+### DNS recon
+
+```sh
+inspectyn recon -u example.com
+```
+
+Recon queries A, AAAA, SPF, DMARC, and MX records for the exact configured names. It does not connect to any returned address, enumerate subdomains, or request an HTTPS endpoint. `--no-dns` limits the result to address lookups.
+
+DNS observations come from the machine's configured resolver. They are not independent authoritative-zone verification. A lookup failure is distinct from an absent record and leaves the report incomplete.
 
 ### Check coverage
 
 | Area | Coverage |
 | --- | --- |
 | TLS | Certificate verification, hostname match, and expiry |
-| HTTP | HSTS, selected content-type protections, CSP presence, and framing-policy observations |
-| SPF | Direct record presence, duplicate records, and selected syntax/fallback checks |
-| DMARC | Direct record presence, duplicate records, and selected policy checks |
-| MX | Records observed at the target hostname |
+| HTTP | HSTS, content-type protection, CSP presence, and selected framing-policy checks |
+| A/AAAA | Addresses returned for the configured hostname |
+| SPF | Direct record presence, duplicates, and selected syntax/fallback checks |
+| DMARC | Direct record presence, duplicates, and selected policy checks |
+| MX | Records returned for the configured hostname |
 
-SPF is queried at the exact target hostname. DMARC is queried at `_dmarc.<target hostname>`. Parent-domain DMARC inheritance and recursive SPF mechanisms are not evaluated. A missing direct record does not establish the effective mail policy or whether the host sends mail.
+SPF is queried at the exact target hostname; DMARC at `_dmarc.<hostname>`. Parent-domain DMARC inheritance and recursive SPF mechanisms are not evaluated. A missing direct record does not establish the effective mail policy or whether a hostname sends mail.
 
-Header presence does not establish policy strength. Checks describe the returned response, which may be an error page or redirect. Spectyn does not crawl, discover subdomains, scan other ports, authenticate to applications, inspect private endpoints, or execute exploits.
+Header presence does not establish policy strength. HTTP checks describe the returned response, including error pages and redirects. Inspectyn does not crawl, discover hosts, scan other ports, authenticate to applications, connect to private endpoints, or execute exploits.
 
 ## Offline reviews
 
-All review commands read local UTF-8 files and make no network requests.
+Install the JavaScript command from the repository root:
+
+```sh
+npm install --global .
+```
+
+There is no published npm package. Without global installation, replace `inspectyn-js` with `node bin/inspectyn-js.mjs`. All review commands below read local files and make no network requests.
 
 ### HTTP baseline
 
 ```sh
-spectyn review http-baseline --input examples/headers.json
+inspectyn-js review http-baseline --input examples/headers.json
 ```
 
 Accepts JSON observations with `url`, `headers`, and optional `observedAt`. Headers can be an object or an array of `{ "name": "...", "value": "..." }` entries. Checks cover HSTS, enforced CSP on HTML responses, and `X-Content-Type-Options`. Missing scheme or response context can leave a check **Not assessable**. Report-only CSP does not count as enforcement.
@@ -65,88 +106,99 @@ Accepts JSON observations with `url`, `headers`, and optional `observedAt`. Head
 ### Nuclei results
 
 ```sh
-spectyn review nuclei-review --input examples/nuclei.json --fail-on none
+inspectyn-js review nuclei-review --input examples/nuclei.json --fail-on none
 ```
 
-Accepts an HTTP Nuclei JSON object, array, or JSONL file. Negative matcher events and error events are counted and excluded. Positive observations are grouped by template, service origin, matcher, CVE IDs, and reported severity. Counts and first/latest supplied observation dates remain in the report.
-
-This command imports results; it does not run Nuclei or execute templates. An imported match remains a review candidate.
+Accepts HTTP Nuclei JSON objects, arrays, or JSONL. Negative matcher events and errors are counted and excluded. Positive observations are grouped by template, service origin, matcher, CVE IDs, and reported severity. Counts and first/latest supplied dates remain in the report. Imported matches are review candidates; no template is executed.
 
 ### KEV matching
 
 ```sh
-spectyn review kev-match --input examples/nuclei.json --catalog examples/kev.json --fail-on none
+inspectyn-js review kev-match --input examples/nuclei.json --catalog examples/kev.json --fail-on none
 ```
 
-Matches exact CVE IDs against the supplied catalogue's `vulnerabilities` array and preserves `catalogVersion` and `dateReleased`. A nonmatch means the ID was absent from that snapshot. Records with no CVE ID retain unknown KEV status. The CLI does not download or authenticate the catalogue.
+Matches exact CVE IDs against the supplied catalogue's `vulnerabilities` array and retains `catalogVersion` and `dateReleased`. A nonmatch means the ID was absent from that snapshot. Findings without a CVE ID retain unknown KEV status. The catalogue is not downloaded or authenticated.
 
 ### CVE applicability
 
 ```sh
-spectyn review cve-applicability --input examples/inventory.json --advisory examples/advisory.json --fail-on none
+inspectyn-js review cve-applicability --input examples/inventory.json --advisory examples/advisory.json --fail-on none
 ```
 
-Inventory observations supply `asset`, `vendor`, `product`, `version`, `source`, and `observedAt`. The advisory must be one published CVE Record in format 5.0, 5.1, or 5.2.
+Inventory rows supply `asset`, `vendor`, `product`, `version`, `source`, and `observedAt`. The advisory must be a published CVE Record in format 5.0, 5.1, or 5.2.
 
-The comparison uses case-insensitive exact vendor/product identity and explicit exact-version CNA entries. An affected-version match produces **Needs review**. An explicit unaffected entry applies only to that advisory and observation. Version ranges, platform/module qualifiers, transitions, conflicts, and incomplete inventory remain **Not assessable**. Default status and ADP entries are not used to infer applicability.
+The comparison uses case-insensitive exact vendor/product identity and explicit exact-version CNA entries. An affected entry produces **Needs review**. An unaffected entry applies only to that advisory and observation. Version ranges, platform/module qualifiers, transitions, conflicts, and incomplete inventory remain **Not assessable**. Default status and ADP entries are not used to infer applicability.
 
-CVE candidates have unknown severity. With an enabled severity gate, actionable unknown severity returns exit `2`; `--fail-on none` allows a completed review to succeed while retaining those candidates. It does not suppress incomplete evidence or errors. See [exit codes](../README.md#reports-and-exit-codes).
+CVE candidates have unknown severity. An enabled severity gate therefore returns `2` for actionable candidates. `--fail-on none` disables that gate but still returns `2` for incomplete evidence or errors. A candidate does not establish exploitability.
 
-### Input limits and provenance
+### Input limits
 
 | Input | Limit |
 | --- | --- |
 | Evidence or CVE Record | 2 MiB |
 | Evidence observations | 500 per review |
 | KEV catalogue | 8 MiB and 20,000 entries |
-| Saved Spectyn report | 10 MiB |
-| Configuration file | 64 KiB |
+| Saved report | 10 MiB |
+| Configuration or target list | 64 KiB |
 
-Inputs must be regular UTF-8 files. Standard input and named pipes are not accepted. Supplied evidence and intelligence are not authenticated. The files in `examples/` are fictional fixtures, including examples that use a real CVE ID to illustrate matching. The CLI does not automatically detect fixture files.
+Inputs must be regular UTF-8 files; stdin and named pipes are not accepted. Supplied evidence and intelligence are not authenticated. Files in `examples/` are fictional fixtures, including examples that use a real CVE ID to demonstrate matching. Fixture files are not automatically identified by the CLI.
 
 ## Reports
 
-`scan`, `review`, and `report` accept `--format text|json|markdown|html`, `--out`, and `--fail-on`. Text on stdout and a `high` severity threshold are the defaults.
+Native `scan` and `recon`, and JavaScript `review` and `report`, support `--format text|json|markdown|html`, `--out`, and `--fail-on`. Defaults are text on stdout and a `high` severity threshold.
 
 ```sh
-spectyn review http-baseline --input examples/headers.json --format json --out headers.json
-spectyn report headers.json --format html --out headers.html
-spectyn report headers.json --format markdown --out headers.md
+inspectyn scan -u https://your-domain.com --format json --out scan.json
+inspectyn-js report scan.json --format html --out scan.html
+inspectyn-js report scan.json --format markdown --out scan.md
 ```
 
-Keep JSON when you need to render another format. `report` validates the saved schema and applies the selected exit gate again. HTML includes its own styling with no scripts or external assets. Existing files are never overwritten through `--out`.
+Save JSON to render another format later. `inspectyn-js report` validates the saved schema and reapplies the selected exit gate. HTML reports contain their own styling without scripts or external assets. `--out` exclusively creates a file and refuses to overwrite an existing path.
 
-The `complete` field records whether evidence processing completed. Severity gating is separate: a completed report can contain an actionable finding whose unknown severity prevents a threshold decision. Review state, errors, source context, dates, and recommendations remain available in the report.
+Exit `0` means completed processing with a passed or disabled gate. Exit `1` means an actionable finding meets the threshold. Exit `2` means invalid input, an error, incomplete evidence, or unknown actionable severity with a gate enabled. **Observed** and **Not applicable** findings do not trigger severity gates; **Not assessable** findings return `2` even with `--fail-on none`.
+
+The report's `complete` field describes evidence processing separately from severity gating. A complete report can have an unknown-severity candidate that prevents a threshold decision. Reports can still be saved when a command returns `1` or `2`.
 
 ## Docker
 
-Build the image from the repository root:
+Build the native image from the repository root:
 
 ```sh
-docker build -t spectyn .
-docker run --rm --network none spectyn review http-baseline --input /opt/spectyn/examples/headers.json --format json > report.json
+docker build -t inspectyn .
+docker run --rm inspectyn --help
+docker run --rm inspectyn recon -u example.com --format json > dns.json
+docker run --rm inspectyn scan -u https://your-domain.com --format json > scan.json
 ```
 
-To review your own evidence, mount the working directory read-only:
+The native image contains the Go binary and runs as UID `65532`; Node.js is not included. It uses a scratch runtime with a CA bundle for TLS verification.
+
+Build the separate image for offline reviews:
 
 ```sh
-docker run --rm --network none --mount "type=bind,source=${PWD},target=/work,readonly" spectyn review http-baseline --input headers.json --format html > report.html
+docker build -f Dockerfile.review -t inspectyn-review .
+docker run --rm --network none inspectyn-review review http-baseline --input /opt/inspectyn/examples/headers.json --format json > report.json
 ```
 
-Live scans require network access:
+Mount your working directory read-only to review your own evidence:
 
 ```sh
-docker run --rm spectyn scan --target https://your-domain.com --format json > scan.json
+docker run --rm --network none --mount "type=bind,source=${PWD},target=/work,readonly" inspectyn-review review http-baseline --input headers.json --format html > report.html
 ```
 
-The container runs as the non-root `node` user. These examples send output to the host shell, so the container does not need write access to a mounted directory. Shell redirection can overwrite files; the CLI's exclusive-file protection applies only to `--out`.
+The review image uses Node.js and runs as the non-root `node` user. Both images write to stdout in these examples, so the containers need no write access to mounted files. Host shell redirection can overwrite files; exclusive output protection applies only to `--out`.
 
 On Windows PowerShell 5.1, use `| Out-File -Encoding utf8 report.json` instead of `> report.json` to save UTF-8 JSON.
 
 ## Data handling
 
-Spectyn has no telemetry or hosted storage. Offline reviews stay on the machine running the command. Live scans contact the supplied endpoint and DNS resolver.
+Inspectyn has no telemetry or hosted storage. Offline reviews stay on the machine running them. Live scans contact the configured endpoint and DNS resolver. DNS recon contacts the resolver without connecting to the named endpoints.
 
-Normalized review reports exclude raw request/response bodies, replay commands, complete templates, and URL credentials, paths, and queries. Accepted titles, source labels, and other text remain supplied evidence. Live scan reports retain configured target URLs, selected response headers, DNS observations, and certificate metadata. Treat report files according to the sensitivity of their contents.
+Normalized reviews exclude raw request/response bodies, replay commands, complete templates, and URL credentials, paths, and queries. Accepted titles and source labels remain supplied text. Scan and recon reports retain target names, selected headers, DNS observations, and available certificate metadata. Apply appropriate access controls to reports before sharing them.
 
-No findings is not an assurance that a target is secure. Results cover only the supplied evidence and requested checks.
+### Compatibility
+
+`inspectyn-js report` reads schema-version-1 reports from Inspectyn and the former Spectyn name, including native `scan` and `recon` reports. Historical `SPECTYN_` and `spectyn.*` rule IDs and the `spectyn-evidence/1.0` ruleset remain stable. Existing report provenance is preserved.
+
+The JavaScript `init` and `scan` commands remain available as `inspectyn-js init` and `inspectyn-js scan`. They keep the earlier sequential implementation and do not accept the native `--list`, `--concurrency`, or `recon` interface.
+
+Results cover only the supplied evidence and requested checks. No findings does not establish that a target is secure.

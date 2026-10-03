@@ -7,3 +7,8 @@
 !src/**
 !examples/
 !examples/**
+!go.mod
+!cmd/
+!cmd/**
+!internal/
+!internal/**

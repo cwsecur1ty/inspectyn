@@ -5,14 +5,14 @@ import { scan } from './scan.mjs';
 import { evidenceRecipes, reviewEvidence, EVIDENCE_LIMIT, CATALOG_LIMIT } from './review.mjs';
 import { renderReport, validateReport, reportExitCode } from './report.mjs';
 
-export const HELP = `Spectyn 0.1.0 — local security checks and evidence review
+export const HELP = `Inspectyn JS 0.2.0 — HTTPS checks and evidence review
 
 Usage:
-  spectyn init [--target https://your-domain.com] [--out spectyn.json]
-  spectyn scan --config spectyn.json [--format text|json|markdown|html] [--out report.json]
-  spectyn scan --target https://your-domain.com [--format json]
-  spectyn review <workflow> --input evidence.json [--catalog kev.json | --advisory cve.json]
-  spectyn report report.json [--format text|json|markdown|html] [--out report.html]
+  inspectyn-js init [--target https://your-domain.com] [--out inspectyn.json]
+  inspectyn-js scan --config inspectyn.json [--format text|json|markdown|html] [--out report.json]
+  inspectyn-js scan --target https://your-domain.com [--format json]
+  inspectyn-js review <workflow> --input evidence.json [--catalog kev.json | --advisory cve.json]
+  inspectyn-js report report.json [--format text|json|markdown|html] [--out report.html]
 
 Workflows: nuclei-review, kev-match, http-baseline, cve-applicability
 Common report options: --format (default text), --out (default stdout), --fail-on (default high)
@@ -45,9 +45,9 @@ export async function main(argv, streams = { stdout:process.stdout, stderr:proce
       seenOptions.add(token.name);
     }
     if (values.help || argv.length === 0) { streams.stdout.write(HELP); return 0; }
-    if (values.version) { streams.stdout.write('0.1.0\n'); return 0; }
+    if (values.version) { streams.stdout.write('0.2.0\n'); return 0; }
     const [command,argument,...extra] = positionals;
-    if (!Object.hasOwn(allowed,command)) throw new Error('Unknown command. Run spectyn --help.');
+    if (!Object.hasOwn(allowed,command)) throw new Error('Unknown command. Run inspectyn-js --help.');
     if (extra.length || (['init','scan'].includes(command) && argument)) throw new Error('Unexpected positional argument.');
     for (const key of Object.keys(values)) if (!allowed[command].includes(key)) throw new Error(`--${key} is not supported by ${command}.`);
     const format = values.format ?? 'text', failOn = values['fail-on'] ?? 'high';
@@ -55,7 +55,7 @@ export async function main(argv, streams = { stdout:process.stdout, stderr:proce
     if (!['none','info','low','medium','high','critical'].includes(failOn)) throw new Error('Unknown fail-on severity.');
     if (command === 'init') {
       const config = {...DEFAULT_CONFIG,targets:values.target ? [normalizeTarget(values.target)] : []};
-      const path = values.out ?? 'spectyn.json';
+      const path = values.out ?? 'inspectyn.json';
       await writeNewFile(path,JSON.stringify(config,null,2)+'\n');
       streams.stdout.write(`Created ${scrub(path)}. ${config.targets.length ? 'Run scan when ready.' : 'Add your explicit HTTPS targets before scanning.'}\n`);
       return 0;
@@ -76,7 +76,7 @@ export async function main(argv, streams = { stdout:process.stdout, stderr:proce
       const supplement = values.catalog ? await readBounded(values.catalog,CATALOG_LIMIT) : values.advisory ? await readBounded(values.advisory,EVIDENCE_LIMIT) : '';
       report = reviewEvidence(argument,input,supplement);
     } else {
-      if (!argument) throw new Error('report requires a Spectyn JSON report file.');
+      if (!argument) throw new Error('report requires an Inspectyn JSON report file.');
       report = parseJson(await readBounded(argument,10*1024*1024),'Report');
     }
     validateReport(report);
@@ -85,11 +85,11 @@ export async function main(argv, streams = { stdout:process.stdout, stderr:proce
     else streams.stdout.write(output.endsWith('\n') ? output : output+'\n');
     const code = reportExitCode(report,failOn);
     if (failOn !== 'none' && report.findings.some(finding => finding.severity === 'unknown' && (finding.state === undefined || finding.state === 'Needs review'))) {
-      streams.stderr.write('spectyn: The severity gate cannot be evaluated for an actionable finding with unknown severity. Review the evidence; --fail-on none explicitly disables severity gating.\n');
+      streams.stderr.write('inspectyn-js: The severity gate cannot be evaluated for an actionable finding with unknown severity. Review the evidence; --fail-on none explicitly disables severity gating.\n');
     }
     return code;
   } catch (error) {
-    streams.stderr.write(`spectyn: ${scrub(error.message)}\n`);
+    streams.stderr.write(`inspectyn-js: ${scrub(error.message)}\n`);
     return 2;
   }
 }

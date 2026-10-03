@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  javascript:
     name: Node ${{ matrix.node }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
@@ -29,3 +29,41 @@ jobs:
         run: npm test
       - name: Inspect package contents
         run: npm pack --dry-run --json
+  native:
+    name: Go ${{ matrix.go }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        go: ['1.24.x', '1.26.x', '1.27.x']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache: false
+      - name: Test native checks
+        run: go test ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Race checks
+        if: runner.os == 'Linux' && matrix.go == '1.27.x'
+        run: go test -race ./...
+      - name: Build native executable
+        run: go build ./cmd/inspectyn
+  containers:
+    name: Container smoke tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: docker build -t inspectyn .
+      - run: docker run --rm --network none inspectyn --version
+      - run: docker build -f Dockerfile.review -t inspectyn-review .
+      - run: docker run --rm --network none inspectyn-review review http-baseline --input /opt/inspectyn/examples/headers.json --format json

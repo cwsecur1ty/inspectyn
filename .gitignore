@@ -2,6 +2,10 @@ node_modules/
 *.tgz
 reports/
 spectyn.json
+inspectyn.json
+/inspectyn
+/inspectyn.exe
+/release/
 *.log
 .env*
 !.env.example

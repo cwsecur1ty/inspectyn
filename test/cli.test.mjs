@@ -9,16 +9,30 @@ import { scan } from '../src/scan.mjs';
 import { reportExitCode } from '../src/report.mjs';
 
 const root = fileURLToPath(new URL('../',import.meta.url));
-const run = (...args) => spawnSync(process.execPath,[join(root,'bin/spectyn.mjs'),...args],{encoding:'utf8',timeout:10000,cwd:tmpdir()});
+const run = (...args) => spawnSync(process.execPath,[join(root,'bin/inspectyn-js.mjs'),...args],{encoding:'utf8',timeout:10000,cwd:tmpdir()});
+
+test('JavaScript entry point identifies Inspectyn and matches its package version', async () => {
+  const version = run('--version');
+  assert.equal(version.status, 0, version.stderr);
+  assert.equal(version.stdout, '0.2.0\n');
+  assert.match(run('--help').stdout, /Inspectyn JS 0\.2\.0/);
+  assert.match(run('--help').stdout, /inspectyn-js scan/);
+  const metadata = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
+  assert.equal(metadata.name, '@inspectyn/cli');
+  assert.equal(metadata.version, version.stdout.trim());
+  assert.deepEqual(metadata.bin, { 'inspectyn-js': 'bin/inspectyn-js.mjs' });
+  assert.equal(metadata.private, true);
+});
 
 test('standalone command runs outside project, emits valid JSON, and converts to escaped HTML', async () => {
-  const directory = await mkdtemp(join(tmpdir(),'spectyn-cli-'));
+  const directory = await mkdtemp(join(tmpdir(),'inspectyn-cli-'));
   try {
     const report = join(directory,'report.json');
     const result = run('review','http-baseline','--input',join(root,'examples/headers.json'),'--format','json','--out',report);
     assert.equal(result.status,0,result.stderr);
     const data = JSON.parse(await readFile(report,'utf8'));
     assert.equal(data.kind,'review');
+    assert.deepEqual(data.tool,{name:'inspectyn',version:'0.2.0'});
     assert.ok(data.findings.length);
     const converted = run('report',report,'--format','html');
     assert.equal(converted.status,0,converted.stderr);
@@ -32,7 +46,7 @@ test('standalone command runs outside project, emits valid JSON, and converts to
 
 test('help/version, invalid arguments and missing evidence have deterministic exit codes', () => {
   assert.equal(run('--help').status,0);
-  assert.match(run('--version').stdout,/0\.1\.0/);
+  assert.match(run('--version').stdout,/0\.2\.0/);
   for (const args of [['scan'],['scan','--target','http://company.com'],['scan','--target','https://127.0.0.1'],
     ['review','kev-match','--input','missing.json'],['scan','--target','https://company.com','--format','csv'],
     ['review','http-baseline','--input','missing.json'],['bogus'],['init','--unknown'],['review','http-baseline','--input','x','--advisory','y']]) {
@@ -43,9 +57,9 @@ test('help/version, invalid arguments and missing evidence have deterministic ex
 });
 
 test('init refuses overwrite and review bounds input before parsing', async () => {
-  const directory = await mkdtemp(join(tmpdir(),'spectyn-cli-'));
+  const directory = await mkdtemp(join(tmpdir(),'inspectyn-cli-'));
   try {
-    const config = join(directory,'spectyn.json');
+    const config = join(directory,'inspectyn.json');
     assert.equal(run('init','--out',config,'--target','https://company.com').status,0);
     assert.equal(run('init','--out',config).status,2);
     assert.deepEqual(JSON.parse(await readFile(config,'utf8')).targets,['https://company.com/']);
@@ -64,6 +78,7 @@ test('scan partial failures keep successful evidence and cannot yield clean CI',
       tls:{authorized:true,protocol:'TLSv1.3',validTo:'2099-01-01T00:00:00Z'}};
   });
   assert.equal(report.observations.length,1);
+  assert.deepEqual(report.tool,{name:'inspectyn',version:'0.2.0'});
   assert.equal(report.complete,false);
   assert.equal(report.errors.length,1);
   assert.equal(reportExitCode(report,'none'),2);
@@ -77,7 +92,7 @@ test('unknown severity cannot silently pass a gate and malformed JSON never echo
   assert.equal(JSON.parse(gated.stdout).complete,true);
   assert.match(gated.stderr,/unknown severity/);
   assert.equal(run(...args,'--fail-on','none').status,0);
-  const directory = await mkdtemp(join(tmpdir(),'spectyn-cli-'));
+  const directory = await mkdtemp(join(tmpdir(),'inspectyn-cli-'));
   try {
     const path = join(directory,'invalid.json');
     await writeFile(path,'private-token=this-must-not-be-echoed');

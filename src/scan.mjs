@@ -21,7 +21,7 @@ export async function scan(input, collect = collectTarget) {
       }
     }
   }
-  return { schemaVersion:1,tool:{name:'spectyn',version:'0.1.0'},kind:'scan',generatedAt:new Date().toISOString(),
+  return { schemaVersion:1,tool:{name:'inspectyn',version:'0.2.0'},kind:'scan',generatedAt:new Date().toISOString(),
     complete:errors.length === 0 && !findings.some(finding => finding.state === 'Not assessable'),targets:config.targets,findings,errors,observations,
     context:{ dns:config.dns,scope:'Explicit HTTPS URLs only; redirects are not followed.',
       coverage:'One public IP and one HTTPS response per target. No body analysis, crawling, port scan, CVE discovery or exploit verification. DNS mail policy is checked at the exact target hostname only.',

@@ -47,6 +47,7 @@ test('request pins the actual IP while authenticating the original hostname', ()
   const options = pinnedRequestOptions(new URL('https://company.com/path'),'8.8.8.8');
   assert.equal(options.hostname,'8.8.8.8');
   assert.equal(options.headers.Host,'company.com');
+  assert.equal(options.headers['User-Agent'],'Inspectyn/0.2.0');
   assert.equal(options.servername,'company.com');
   assert.equal(options.agent,false);
   assert.equal(options.rejectUnauthorized,true);

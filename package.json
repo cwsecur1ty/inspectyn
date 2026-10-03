@@ -1,17 +1,17 @@
 {
-  "name": "@spectyn/cli",
-  "version": "0.1.0",
+  "name": "@inspectyn/cli",
+  "version": "0.2.0",
   "description": "HTTPS security checks, DNS policy checks, and offline evidence review.",
   "private": true,
   "license": "MIT",
   "author": "cwsecur1ty",
-  "homepage": "https://github.com/cwsecur1ty/spectyn#readme",
-  "repository": { "type": "git", "url": "git+https://github.com/cwsecur1ty/spectyn.git" },
-  "bugs": { "url": "https://github.com/cwsecur1ty/spectyn/issues" },
+  "homepage": "https://github.com/cwsecur1ty/inspectyn#readme",
+  "repository": { "type": "git", "url": "git+https://github.com/cwsecur1ty/inspectyn.git" },
+  "bugs": { "url": "https://github.com/cwsecur1ty/inspectyn/issues" },
   "keywords": ["security", "cli", "tls", "dns", "cve", "nuclei", "kev"],
   "type": "module",
   "engines": { "node": ">=22.13.0" },
-  "bin": { "spectyn": "bin/spectyn.mjs" },
+  "bin": { "inspectyn-js": "bin/inspectyn-js.mjs" },
   "files": ["bin/", "src/", "examples/", "docs/", "README.md", "LICENSE", "SECURITY.md"],
-  "scripts": { "test": "node --test", "start": "node bin/spectyn.mjs" }
+  "scripts": { "test": "node --test", "start": "node bin/inspectyn-js.mjs" }
 }

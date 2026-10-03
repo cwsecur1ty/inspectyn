@@ -23,7 +23,7 @@ export function reviewEvidence(workflow, input, supplement = '') {
 
   return {
     schemaVersion: 1,
-    tool: { name: 'spectyn', version: '0.1.0' },
+    tool: { name: 'inspectyn', version: '0.2.0' },
     kind: 'review',
     generatedAt: original.completedAt,
     complete: findings.every((finding) => finding.state !== 'Not assessable'),

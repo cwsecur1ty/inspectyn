@@ -1,19 +1,27 @@
 # Contributing
 
-Spectyn uses Node.js 22.13 or later and has no npm dependencies. No build step is required.
+Use Go 1.24 or later for the native CLI. The optional JavaScript tools require Node.js 22.13 or later and have no npm dependencies.
 
 ```sh
-node bin/spectyn.mjs --help
+go test ./...
+go vet ./...
+go build -o inspectyn ./cmd/inspectyn
 npm test
 npm pack --dry-run --json
 ```
 
-Use `npm.cmd` on Windows if PowerShell blocks the npm script wrapper.
+On Windows, use `-o inspectyn.exe` and `npm.cmd` if PowerShell blocks the npm wrapper.
 
-Keep pull requests focused. Describe the behavior change, include a small example where useful, and add tests for the affected checks. The test suite runs offline using synthetic evidence and injected network responses.
+With `go` on `PATH`, build release archives and SHA-256 checksums for Linux, macOS, and Windows (amd64 and arm64):
 
-Changes to network handling should cover destination validation, TLS verification, timeouts, response limits, and redirects. Preserve unknown and incomplete states when evidence is missing or a check cannot finish. Document changes to configuration, report schemas, flags, and exit codes.
+```sh
+go run ./scripts/build-release.go -out release
+```
 
-Keep credentials, customer data, and real scan captures out of fixtures. For a new dependency, explain what it adds and why the standard library is insufficient.
+The output directory must not already exist. Each archive contains the native executable, README, and license.
 
-CI runs the tests on Node 22 and 24 across Linux, Windows, and macOS. For vulnerability reports, follow [SECURITY.md](SECURITY.md).
+Keep pull requests focused. Describe the behavior change, include a small example where useful, and add tests for affected checks. Tests should use synthetic evidence, controlled test servers, and injected network responses rather than third-party targets.
+
+Network changes should cover destination validation, TLS verification, concurrency, timeouts, response limits, and redirects. Preserve unknown and incomplete states when evidence is missing or a check fails. Document changes to flags, configuration, report schemas, and exit codes, including compatibility between native reports and the JavaScript renderer.
+
+Keep credentials, customer data, and production scan captures out of fixtures. Explain new dependencies and why the standard library is insufficient. For vulnerability reports, follow [SECURITY.md](SECURITY.md).

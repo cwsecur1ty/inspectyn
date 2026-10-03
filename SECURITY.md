@@ -1,13 +1,17 @@
 # Security
 
-Report vulnerabilities through [GitHub's private reporting form](https://github.com/cwsecur1ty/spectyn/security/advisories/new). Include the affected version, reproduction steps, expected behavior and impact. Use synthetic evidence where possible. Keep credentials and customer data out of public issues.
+Report vulnerabilities through [GitHub private reporting](https://github.com/cwsecur1ty/inspectyn/security/advisories/new). Include the affected version, reproduction steps, expected behavior, and impact. Use synthetic evidence where possible and keep credentials or customer data out of public issues.
 
 Security fixes target the latest version on `main`.
 
 ## Scope
 
-`review` and `report` run offline. `scan` sends one HTTPS request per configured endpoint and queries DNS. Connections use a validated public IP with TLS and hostname verification. Redirects, private addresses and arbitrary ports are not supported.
+`inspectyn scan` sends one HTTPS request per configured public endpoint and queries DNS. It pins the connection to a validated address and verifies the TLS certificate and hostname. Redirects, private endpoint connections, and arbitrary ports are not supported.
 
-Imported templates and payloads are treated as data and never executed. Reports include target names, selected response headers, DNS policies and accepted source labels. These fields may contain sensitive information; review reports before sharing them. The CLI sends no telemetry.
+`inspectyn recon` queries DNS for exact names without connecting to their returned addresses. It does not enumerate hosts. DNS records reflect the configured resolver's responses, not independent authoritative-zone verification.
 
-See [usage](docs/usage.md) for limits and exit codes.
+`inspectyn-js review` and `inspectyn-js report` run offline. Imported templates, commands, and payloads are treated as data and never executed. The retained JavaScript `scan` command uses the same explicit public-endpoint boundary.
+
+Reports include target names, selected response headers, DNS policies, and accepted source labels. These can contain sensitive information; review reports before sharing them. Neither executable sends telemetry.
+
+See [usage](docs/usage.md) for coverage, limits, and exit codes.

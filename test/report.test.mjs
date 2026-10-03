@@ -3,7 +3,44 @@ import assert from 'node:assert/strict';
 import { renderReport, reportExitCode, validateReport } from '../src/report.mjs';
 
 const finding = (overrides = {}) => ({ ruleId: 'spectyn.hsts.v1', severity: 'high', title: 'Review transport policy', evidence: 'Missing supplied policy', remediation: 'Review service configuration', target: 'https://example.com', ...overrides });
-const report = (overrides = {}) => ({ schemaVersion: 1, tool: { name: 'spectyn', version: '0.1.0' }, kind: 'review', generatedAt: '2026-10-03T10:00:00.000Z', complete: true, targets: ['https://example.com'], findings: [finding()], errors: [], ...overrides });
+const report = (overrides = {}) => ({ schemaVersion: 1, tool: { name: 'inspectyn', version: '0.2.0' }, kind: 'review', generatedAt: '2026-10-03T10:00:00.000Z', complete: true, targets: ['https://example.com'], findings: [finding()], errors: [], ...overrides });
+
+test('Inspectyn accepts historical Spectyn reports without changing provenance or rule identifiers', () => {
+  const legacy = report({ tool: { name: 'spectyn', version: '0.1.0' }, context: { ruleset: 'spectyn-evidence/1.0' } });
+  assert.equal(validateReport(legacy), legacy);
+  assert.equal(reportExitCode(legacy), 1);
+  for (const format of ['text', 'markdown', 'html']) {
+    const output = renderReport(legacy, format);
+    assert.match(output, /Inspectyn|INSPECTYN/);
+    assert.match(output, /Spectyn 0\.1\.0/);
+    assert.match(output, /spectyn\.hsts\.v1/);
+    assert.match(output, /spectyn-evidence\/1\.0/);
+  }
+  const output = JSON.parse(renderReport(legacy, 'json'));
+  assert.deepEqual(output.tool, { name: 'spectyn', version: '0.1.0' });
+  assert.equal(output.findings[0].ruleId, 'spectyn.hsts.v1');
+  assert.equal(output.context.ruleset, 'spectyn-evidence/1.0');
+  assert.match(renderReport(report()), /Inspectyn 0\.2\.0/);
+});
+
+test('native DNS recon reports round-trip through all JavaScript report formats', () => {
+  const recon = report({
+    kind: 'recon', targets: ['example.com'], findings: [],
+    observations: [{ hostname: 'example.com', observedAt: '2026-10-03T10:00:00.000Z', dns: { mx: { status: 'ok', records: ['10 mail.example.com'] } } }],
+    context: { scope: 'Explicit hostnames; DNS records only.' },
+  });
+  assert.equal(validateReport(recon), recon);
+  assert.equal(reportExitCode(recon), 0);
+  const json = JSON.parse(renderReport(recon, 'json'));
+  assert.equal(json.kind, 'recon');
+  assert.deepEqual(json.observations, recon.observations);
+  for (const format of ['text', 'markdown', 'html']) {
+    const output = renderReport(json, format);
+    assert.match(output, /recon/i);
+    assert.match(output, /mail\.example\.com/);
+    assert.match(output, /Inspectyn 0\.2\.0/);
+  }
+});
 
 test('exit codes distinguish threshold, incomplete evidence and successful coverage', () => {
   assert.equal(reportExitCode(report()), 1);
@@ -28,7 +65,7 @@ test('exit codes distinguish threshold, incomplete evidence and successful cover
 test('validation rejects wrong schemas, shapes, excessive values and non-JSON metadata', () => {
   assert.equal(validateReport(report()).schemaVersion, 1);
   for (const invalid of [null, report({ schemaVersion: 2 }), report({ tool: { name: 'other', version: '1' } }), report({ kind: 'unknown' }), report({ generatedAt: '2026-10-03' }), report({ complete: 'yes' }), report({ targets: [null] }), report({ targets: Array(501).fill('x') }), report({ findings: [finding({ severity: 'urgent' })] }), report({ findings: [finding({ state: 'Passed' })] }), report({ findings: [finding({ evidence: 'x'.repeat(16385) })] }), report({ findings: Array(2001).fill(finding()) }), report({ errors: [{ target: 'x', code: 'FAIL' }] }), report({ context: { value: Infinity } }), report({ context: { value: undefined } }), report({ context: { value: new Date() } })]) {
-    assert.throws(() => validateReport(invalid), /Invalid Spectyn report/);
+    assert.throws(() => validateReport(invalid), /Invalid Inspectyn report/);
   }
   const circular = {}; circular.self = circular;
   assert.throws(() => validateReport(report({ context: circular })), /circular/);

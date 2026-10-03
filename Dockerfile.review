@@ -1,0 +1,10 @@
+FROM node:22-alpine
+WORKDIR /opt/inspectyn
+COPY package.json LICENSE ./
+COPY bin ./bin
+COPY src ./src
+COPY examples ./examples
+USER node
+WORKDIR /work
+ENTRYPOINT ["node", "/opt/inspectyn/bin/inspectyn-js.mjs"]
+CMD ["--help"]

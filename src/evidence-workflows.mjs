@@ -6,7 +6,7 @@ export const evidenceRecipes = [
     { id: "nuclei-review", title: "Nuclei findings review", category: "Scan results", summary: "Normalise existing HTTP results, group repeat observations and prepare a review queue.", input: "Nuclei HTTP JSON or JSONL", output: "Grouped findings + CVE references" },
     { id: "kev-match", title: "KEV priority review", category: "CVE / KEV", summary: "Match reported CVE IDs against a supplied KEV catalogue, retaining its release date.", input: "Nuclei report + KEV JSON", output: "Exact CVE matches + catalogue context" },
     { id: "cve-applicability", title: "CVE applicability review", category: "CVE / KEV", summary: "Compare inventory with explicit version entries in a supplied CVE record. Keep uncertain matches open.", input: "Product inventory JSON + CVE Record JSON", output: "Exact-version candidates + unresolved evidence" },
-    { id: "http-baseline", title: "Spectyn HTTP baseline", category: "Common exposures", summary: "Review supplied response metadata for transport and browser-policy configuration gaps.", input: "HTTP observation JSON", output: "HSTS, CSP and content-type review" },
+    { id: "http-baseline", title: "Inspectyn HTTP baseline", category: "Common exposures", summary: "Review supplied response metadata for transport and browser-policy configuration gaps.", input: "HTTP observation JSON", output: "HSTS, CSP and content-type review" },
 ];
 export const EVIDENCE_LIMIT = 2 * 1024 * 1024;
 export const CATALOG_LIMIT = 8 * 1024 * 1024;

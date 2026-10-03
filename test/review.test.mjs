@@ -27,7 +27,7 @@ test('all four evidence workflows produce the common report shape without networ
     for (const { id } of evidenceRecipes) {
       const report = reviewEvidence(id, ...inputs[id]);
       assert.equal(report.schemaVersion, 1);
-      assert.deepEqual(report.tool, { name: 'spectyn', version: '0.1.0' });
+      assert.deepEqual(report.tool, { name: 'inspectyn', version: '0.2.0' });
       assert.equal(report.kind, 'review');
       assert.ok(Number.isFinite(Date.parse(report.generatedAt)));
       assert.equal(report.complete, true);

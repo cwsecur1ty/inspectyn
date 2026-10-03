@@ -55,7 +55,7 @@ export function pinnedRequestOptions(url, address) {
   return { hostname: address, family: isIP(address), port: 443, path: url.pathname, method: 'GET',
     servername: url.hostname, rejectUnauthorized: true, minVersion: 'TLSv1.2', agent: false,
     checkServerIdentity: (_host, cert) => checkServerIdentity(url.hostname, cert),
-    maxHeaderSize: 32768, headers: { Host: url.hostname, 'User-Agent': 'Spectyn/0.1.0', Accept: '*/*', Connection: 'close' } };
+    maxHeaderSize: 32768, headers: { Host: url.hostname, 'User-Agent': 'Inspectyn/0.2.0', Accept: '*/*', Connection: 'close' } };
 }
 
 export function requestHeaders(url, address, timeoutMs, request = https.request) {

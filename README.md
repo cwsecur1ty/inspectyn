@@ -1,139 +1,139 @@
 <div align="center">
 
-<h1>Spectyn</h1>
-<p><strong>Endpoint security checks and evidence review</strong></p>
+<h1>Inspectyn</h1>
+<p><strong>TLS, HTTP and DNS checks</strong></p>
 
-[![CI](https://github.com/cwsecur1ty/spectyn/actions/workflows/ci.yml/badge.svg)](https://github.com/cwsecur1ty/spectyn/actions/workflows/ci.yml)
-[![Node.js >=22.13](https://img.shields.io/badge/Node.js-%3E%3D22.13-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
+[![CI](https://github.com/cwsecur1ty/inspectyn/actions/workflows/ci.yml/badge.svg)](https://github.com/cwsecur1ty/inspectyn/actions/workflows/ci.yml)
+[![Go >=1.24](https://img.shields.io/badge/Go-%3E%3D1.24-00ADD8?logo=go&logoColor=white)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 <p>
-  <a href="#features">Features</a> &bull;
-  <a href="#installation">Installation</a> &bull;
-  <a href="#quick-start">Quick Start</a> &bull;
-  <a href="#commands">Commands</a> &bull;
+  <a href="#install">Install</a> &bull;
+  <a href="#usage">Usage</a> &bull;
+  <a href="#options">Options</a> &bull;
+  <a href="#evidence-review">Evidence Review</a> &bull;
   <a href="docs/usage.md">Documentation</a>
 </p>
 
 </div>
 
-Spectyn checks public HTTPS endpoints and turns existing security evidence into reports. Run it from a terminal, in CI, or in Docker. No account, API key, or npm dependencies required.
+Inspectyn checks TLS certificates, HTTP security headers, and DNS records. It also reviews Nuclei results and matches supplied inventory against CVE records.
 
-## Features
+The native Go binary handles scanning and DNS recon. The optional JavaScript command handles offline evidence review and saved reports. Scanning does not require Node.js.
 
-- **Endpoint checks** for TLS certificates, HSTS, CSP, content-type protection, and framing policies.
-- **DNS observations** for SPF, DMARC, and MX at the target hostname.
-- **Nuclei result review** with grouped findings, reported severity, CVE IDs, and observation dates.
-- **KEV matching** against a supplied catalogue and **CVE applicability** checks against supplied inventory.
-- **Text, JSON, Markdown, and HTML reports** with evidence, remediation, and source context.
-- **CI exit codes** for severity thresholds, errors, and incomplete evidence.
+## Install
 
-## Installation
-
-Requires Node.js **22.13 or later**. Install from source:
+Download a binary from [Releases](https://github.com/cwsecur1ty/inspectyn/releases/latest), or install with Go **1.24 or later**:
 
 ```sh
-git clone https://github.com/cwsecur1ty/spectyn.git
-cd spectyn
-npm install --global .
-spectyn --help
+go install github.com/cwsecur1ty/inspectyn/cmd/inspectyn@latest
+inspectyn --help
 ```
 
-There is no published npm package. To run without installation:
+To build from source:
 
 ```sh
-node bin/spectyn.mjs --help
+git clone https://github.com/cwsecur1ty/inspectyn.git
+cd inspectyn
+go build -o inspectyn ./cmd/inspectyn
+./inspectyn --help
 ```
 
-On Windows PowerShell, use `npm.cmd` and `spectyn.cmd` if the execution policy blocks their script wrappers.
+On Windows, use `go build -o inspectyn.exe ./cmd/inspectyn` and run `./inspectyn.exe`. Ensure the Go binary directory is on `PATH` when using `go install`.
 
-## Quick Start
+## Usage
 
-Review the bundled HTTP evidence and create a report without making network requests:
+Look up records for an exact hostname:
 
 ```sh
-spectyn review http-baseline --input examples/headers.json --format json --out report.json
-spectyn report report.json --format html --out report.html
+inspectyn recon -u example.com
 ```
 
-Check an endpoint you are authorized to assess. Replace the URL with your own:
+Check an HTTPS endpoint you are authorized to assess:
 
 ```sh
-spectyn scan --target https://your-domain.com --format text
+inspectyn scan -u https://your-domain.com
 ```
 
-For repeated runs, save your targets in a configuration file:
+Read up to 20 targets from a file, one per line:
 
 ```sh
-spectyn init --target https://your-domain.com --out spectyn.json
-spectyn scan --config spectyn.json --format json --out scan.json
+inspectyn scan --list targets.txt --concurrency 4 --format json --out scan.json
 ```
 
-`init` only writes configuration. `scan` requests the explicit URLs; it does not follow redirects, discover hosts, crawl pages, scan other ports, or run exploits. Only public HTTPS hosts on port 443 are supported.
+Save a configuration for repeated runs:
 
-## Commands
+```sh
+inspectyn init --target https://your-domain.com --out inspectyn.json
+inspectyn scan --config inspectyn.json --format html --out scan.html
+```
 
-| Command | Purpose |
+`scan` checks one response per public HTTPS endpoint on port 443. `recon` queries A, AAAA, SPF, DMARC, and MX records for exact names without connecting to the endpoints. Neither command enumerates hosts, crawls, follows redirects, or runs exploits.
+
+## Options
+
+| Option | Description |
 | --- | --- |
-| `spectyn init` | Create a JSON configuration file |
-| `spectyn scan` | Check explicit HTTPS endpoints and their DNS records |
-| `spectyn review <workflow>` | Review local evidence files offline |
-| `spectyn report <report.json>` | Render an existing Spectyn report offline |
+| `--target`, `-u` | One HTTPS URL; `recon` also accepts a hostname |
+| `--list`, `-l` | UTF-8 target file, one entry per line |
+| `--config` | JSON configuration instead of `--target` or `--list` |
+| `--concurrency` | Concurrent targets, `1–16`; default `4`, with one check per hostname |
+| `--timeout-ms` | DNS/HTTPS phase timeout, `1000–30000`; default `10000` |
+| `--no-dns` | Skip SPF, DMARC, and MX queries; address resolution still runs |
+| `--format` | `text`, `json`, `markdown`, or `html`; default `text` |
+| `--out` | Write a new file instead of stdout |
+| `--fail-on` | `info`, `low`, `medium`, `high`, `critical`, or `none`; default `high` |
+| `--help`, `-h` | Show help |
+| `--version`, `-v` | Show version |
 
-| Option | Used by | Description |
-| --- | --- | --- |
-| `--target <url>` | `init`, `scan` | One explicit HTTPS URL |
-| `--config <file>` | `scan` | Configuration with up to 20 targets; use instead of `--target` |
-| `--input <file>` | `review` | Evidence JSON or JSONL |
-| `--catalog <file>` | `review kev-match` | KEV catalogue JSON |
-| `--advisory <file>` | `review cve-applicability` | Published CVE Record JSON |
-| `--format <format>` | `scan`, `review`, `report` | `text`, `json`, `markdown`, or `html`; default `text` |
-| `--out <file>` | All commands | Write a new file; reports default to stdout |
-| `--fail-on <level>` | `scan`, `review`, `report` | `info`, `low`, `medium`, `high`, `critical`, or `none`; default `high` |
-| `--help`, `-h` | All commands | Show help |
-| `--version`, `-v` | All commands | Show version |
+Use exactly one of `--target`, `--list`, or `--config` for `scan` and `recon`. `init` accepts `--target` and `--out`. Files written with `--out` are never overwritten.
 
-Output files are never overwritten. Choose a new filename for each run.
+## Evidence Review
 
-## Evidence Workflows
-
-| Workflow | Inputs | Result |
-| --- | --- | --- |
-| `http-baseline` | HTTP observations with response headers | HSTS, CSP, and content-type checks |
-| `nuclei-review` | Existing HTTP Nuclei results | Grouped observations and review candidates |
-| `kev-match` | Nuclei results + KEV catalogue | Exact CVE-ID matches with catalogue context |
-| `cve-applicability` | Inventory + CVE Record | Exact-version candidates and unresolved comparisons |
-
-Spectyn does not execute Nuclei templates or authenticate supplied intelligence. Example files are fictional fixtures. See the [usage guide](docs/usage.md#offline-reviews) for commands, input formats, and matching limits.
-
-## Reports and Exit Codes
-
-Save JSON to retain structured evidence and render other formats later. HTML reports are standalone files with no scripts or external assets.
+Install the optional JavaScript command from the repository root. It requires Node.js **22.13 or later** and has no npm dependencies:
 
 ```sh
-spectyn report report.json --format markdown --out report.md
-spectyn report report.json --format text
+npm install --global .
+inspectyn-js review http-baseline --input examples/headers.json
 ```
+
+There is no published npm package. Without installation, use `node bin/inspectyn-js.mjs`. On Windows PowerShell, use `npm.cmd` and `inspectyn-js.cmd` if the script wrappers are blocked.
+
+| Workflow | Input |
+| --- | --- |
+| `http-baseline` | HTTP observations with response headers |
+| `nuclei-review` | Existing HTTP Nuclei results |
+| `kev-match` | Nuclei results + supplied KEV catalogue |
+| `cve-applicability` | Inventory + supplied CVE Record |
+
+These workflows run offline. They do not execute Nuclei templates or authenticate supplied intelligence. Bundled examples are fictional fixtures. See [review commands and matching limits](docs/usage.md#offline-reviews).
+
+Native scans produce all four report formats directly. To convert a saved JSON report later:
+
+```sh
+inspectyn-js report scan.json --format html --out scan.html
+```
+
+## Exit Codes
 
 | Code | Meaning |
 | --- | --- |
 | `0` | Processing completed and the severity gate passed or was disabled |
 | `1` | An actionable finding meets the selected severity threshold |
-| `2` | An error, incomplete evidence, or unknown actionable severity prevents evaluating the gate |
+| `2` | An error, incomplete evidence, or unknown actionable severity prevents a gate decision |
 
-**Observed** and **Not applicable** findings do not trigger the gate. **Not assessable** findings return `2`. Unknown severity is not assigned a numeric rank: an exact-version CVE candidate with unknown severity returns `2` when a severity gate is enabled.
+**Observed** and **Not applicable** findings do not trigger the gate. **Not assessable** findings return `2`. Unknown severity is not ranked; an actionable CVE candidate with unknown severity returns `2` when a gate is enabled.
 
-`--fail-on none` disables severity gating, including unknown-severity gating. Errors and incomplete evidence still return `2`. A report may be saved successfully while the command returns `1` or `2`. No findings is not an assurance that an endpoint is secure.
+`--fail-on none` disables severity gating, including unknown-severity gating. Errors and incomplete evidence still return `2`. Reports can be saved successfully with exit `1` or `2`. No findings does not establish that an endpoint is secure.
 
 ## Documentation
 
 - [Configuration, check coverage, and limits](docs/usage.md#configuration)
-- [Offline reviews and CVE matching](docs/usage.md#offline-reviews)
+- [Offline reviews](docs/usage.md#offline-reviews)
 - [Docker](docs/usage.md#docker)
-- [Data handling](docs/usage.md#data-handling)
-- [Contributing](CONTRIBUTING.md)
-- [Security policy](SECURITY.md)
+- [Data handling and compatibility](docs/usage.md#data-handling)
+- [Contributing](CONTRIBUTING.md) and [security reporting](SECURITY.md)
 
 ## License
 
-[MIT](LICENSE). Commercial use, modification, and redistribution are permitted under the license terms. Run live checks only against endpoints you own or are authorized to assess.
+[MIT](LICENSE). Commercial use, modification, and redistribution are permitted under its terms. Assess only endpoints you own or are authorized to test.

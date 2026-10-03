@@ -2,9 +2,10 @@ const SEVERITIES = ['info', 'low', 'medium', 'high', 'critical', 'unknown'];
 const STATES = ['Needs review', 'Observed', 'Not assessable', 'Not applicable'];
 const COVERAGE = 'This report covers only the supplied evidence or explicitly requested checks. No findings is not assurance that a target is secure. Observations and review candidates do not establish exploitability.';
 const MAX_REPORT_BYTES = 10 * 1024 * 1024;
+const toolName = report => report.tool.name === 'spectyn' ? 'Spectyn' : 'Inspectyn';
 
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
-function fail(message) { throw new Error(`Invalid Spectyn report: ${message}`); }
+function fail(message) { throw new Error(`Invalid Inspectyn report: ${message}`); }
 function string(value, label, limit = 16384, allowEmpty = false) {
   if (typeof value !== 'string' || (!allowEmpty && !value.trim()) || value.length > limit) fail(`${label} must be ${allowEmpty ? 'a' : 'a nonempty'} string of at most ${limit} characters.`);
 }
@@ -30,9 +31,9 @@ function validateJson(value, depth = 0, budget = { nodes: 0 }, ancestors = new S
 /** Validate a portable report without interpreting supplied findings as verified facts. */
 export function validateReport(report) {
   if (!object(report) || report.schemaVersion !== 1) fail('expected schemaVersion 1.');
-  if (!object(report.tool) || report.tool.name !== 'spectyn') fail('expected tool.name "spectyn".');
+  if (!object(report.tool) || !['inspectyn', 'spectyn'].includes(report.tool.name)) fail('expected tool.name "inspectyn" or "spectyn".');
   string(report.tool.version, 'tool.version', 80);
-  if (!['scan', 'review'].includes(report.kind)) fail('kind must be scan or review.');
+  if (!['scan', 'review', 'recon'].includes(report.kind)) fail('kind must be scan, review or recon.');
   string(report.generatedAt, 'generatedAt', 50);
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(report.generatedAt) || !Number.isFinite(Date.parse(report.generatedAt))) fail('generatedAt must be an ISO timestamp with a timezone.');
   if (typeof report.complete !== 'boolean') fail('complete must be boolean.');
@@ -107,9 +108,9 @@ function findingMetadata(finding) {
 
 function renderText(report) {
   const lines = [
-    `SPECTYN ${line(report.kind).toUpperCase()} REPORT`,
+    `INSPECTYN ${line(report.kind).toUpperCase()} REPORT`,
     `Status: ${incomplete(report) ? 'INCOMPLETE — errors or evidence gaps require attention' : 'Complete for requested checks'}`,
-    `Generated: ${line(report.generatedAt)} | Spectyn ${line(report.tool.version)}`,
+    `Generated: ${line(report.generatedAt)} | ${toolName(report)} ${line(report.tool.version)}`,
     `Targets: ${report.targets.length} | Findings: ${report.findings.length} | Errors: ${report.errors.length}`,
     '', COVERAGE,
   ];
@@ -129,7 +130,7 @@ function renderText(report) {
 
 function renderMarkdown(report) {
   const md = escapeMarkdown;
-  const lines = ['# Spectyn security report', '', `**Status:** ${incomplete(report) ? 'INCOMPLETE — errors or evidence gaps require attention' : 'Complete for requested checks'}`, '', `Generated: ${md(report.generatedAt)} · Spectyn ${md(report.tool.version)} · ${md(report.kind)}`, '', `Targets: ${report.targets.length} · Findings: ${report.findings.length} · Errors: ${report.errors.length}`, '', COVERAGE, '', '## Targets', '', ...report.targets.map(target => `- ${md(target)}`)];
+  const lines = ['# Inspectyn security report', '', `**Status:** ${incomplete(report) ? 'INCOMPLETE — errors or evidence gaps require attention' : 'Complete for requested checks'}`, '', `Generated: ${md(report.generatedAt)} · ${toolName(report)} ${md(report.tool.version)} · ${md(report.kind)}`, '', `Targets: ${report.targets.length} · Findings: ${report.findings.length} · Errors: ${report.errors.length}`, '', COVERAGE, '', '## Targets', '', ...report.targets.map(target => `- ${md(target)}`)];
   if (!report.targets.length) lines.push('No targets recorded.');
   const context = metadata(report);
   if (Object.keys(context).length) {
@@ -153,8 +154,8 @@ function renderHtml(report) {
     return `<article><h3>${html(finding.title)}</h3><p class="meta">${html(finding.severity.toUpperCase())} · ${html(finding.state ?? 'Needs review')}</p><dl><dt>Target / rule</dt><dd>${html(finding.target)} / ${html(finding.ruleId)}</dd><dt>Evidence</dt><dd>${html(finding.evidence)}</dd><dt>Remediation</dt><dd>${html(finding.remediation)}</dd></dl>${Object.keys(observation).length ? `<p><strong>Observation context</strong></p><pre>${html(displayJson(observation))}</pre>` : ''}</article>`;
   }).join('\n');
   return `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><title>Spectyn security report</title><style>body{font:16px/1.6 system-ui,sans-serif;color:#172638;background:#f4f6f8;margin:0}main{max-width:960px;margin:40px auto;padding:32px;background:white;border:1px solid #d7dee7}h1,h2,h3{line-height:1.25}h1{margin-top:0}h2{margin-top:36px}.status{font-weight:700;padding:14px;border-left:4px solid #376785;background:#eef4f7}.incomplete{border-color:#996012;background:#fff6e7}.meta,dt{color:#536276}.coverage{padding:16px;background:#f4f6f8}article{border-top:1px solid #d7dee7;padding:16px 0}dt{font-weight:600}dd{margin:0 0 14px;white-space:pre-wrap;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere;padding:16px;background:#f4f6f8}li{overflow-wrap:anywhere}@media(max-width:640px){main{margin:0;padding:20px;border:0}}@media print{body{background:white}main{margin:0;border:0;padding:0}article{break-inside:avoid}}</style></head>
-<body><main><h1>Spectyn security report</h1><p class="status${incomplete(report) ? ' incomplete' : ''}">${incomplete(report) ? 'INCOMPLETE — errors or evidence gaps require attention' : 'Complete for requested checks'}</p><p class="meta">${html(report.generatedAt)} · Spectyn ${html(report.tool.version)} · ${html(report.kind)}</p><p>Targets: ${report.targets.length} · Findings: ${report.findings.length} · Errors: ${report.errors.length}</p><p class="coverage">${COVERAGE}</p><h2>Targets</h2>${report.targets.length ? `<ul>${report.targets.map(target => `<li>${html(target)}</li>`).join('')}</ul>` : '<p>No targets recorded.</p>'}
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><title>Inspectyn security report</title><style>body{font:16px/1.6 system-ui,sans-serif;color:#172638;background:#f4f6f8;margin:0}main{max-width:960px;margin:40px auto;padding:32px;background:white;border:1px solid #d7dee7}h1,h2,h3{line-height:1.25}h1{margin-top:0}h2{margin-top:36px}.status{font-weight:700;padding:14px;border-left:4px solid #376785;background:#eef4f7}.incomplete{border-color:#996012;background:#fff6e7}.meta,dt{color:#536276}.coverage{padding:16px;background:#f4f6f8}article{border-top:1px solid #d7dee7;padding:16px 0}dt{font-weight:600}dd{margin:0 0 14px;white-space:pre-wrap;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere;padding:16px;background:#f4f6f8}li{overflow-wrap:anywhere}@media(max-width:640px){main{margin:0;padding:20px;border:0}}@media print{body{background:white}main{margin:0;border:0;padding:0}article{break-inside:avoid}}</style></head>
+<body><main><h1>Inspectyn security report</h1><p class="status${incomplete(report) ? ' incomplete' : ''}">${incomplete(report) ? 'INCOMPLETE — errors or evidence gaps require attention' : 'Complete for requested checks'}</p><p class="meta">${html(report.generatedAt)} · ${toolName(report)} ${html(report.tool.version)} · ${html(report.kind)}</p><p>Targets: ${report.targets.length} · Findings: ${report.findings.length} · Errors: ${report.errors.length}</p><p class="coverage">${COVERAGE}</p><h2>Targets</h2>${report.targets.length ? `<ul>${report.targets.map(target => `<li>${html(target)}</li>`).join('')}</ul>` : '<p>No targets recorded.</p>'}
 ${Object.keys(context).length ? `<h2>Source and workflow context</h2><pre>${html(displayJson(context))}</pre>` : ''}
 <h2>Findings</h2>${findings || '<p>No findings were produced for this coverage.</p>'}
 ${report.errors.length ? `<h2>Errors</h2><ul>${report.errors.map(error => `<li><strong>${html(error.target)}</strong> (${html(error.code)}): ${html(error.message)}</li>`).join('')}</ul>` : ''}
