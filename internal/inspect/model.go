@@ -1,6 +1,6 @@
 package inspect
 
-const Version = "0.2.0"
+const Version = "0.3.0-dev"
 
 type Tool struct {
 	Name    string `json:"name"`
@@ -30,33 +30,80 @@ type DNSResult struct {
 }
 
 type DNSObservation struct {
-	A     DNSResult `json:"a"`
-	AAAA  DNSResult `json:"aaaa"`
-	SPF   DNSResult `json:"spf"`
-	DMARC DNSResult `json:"dmarc"`
-	MX    DNSResult `json:"mx"`
+	A     DNSResult  `json:"a"`
+	AAAA  DNSResult  `json:"aaaa"`
+	SPF   DNSResult  `json:"spf"`
+	DMARC DNSResult  `json:"dmarc"`
+	MX    DNSResult  `json:"mx"`
+	NS    *DNSResult `json:"ns,omitempty"`
+	CNAME *DNSResult `json:"cname,omitempty"`
 }
 
 type HTTPObservation struct {
 	Status  int                 `json:"status"`
 	Headers map[string][]string `json:"headers"`
+	Cookies *CookieObservation  `json:"cookies,omitempty"`
+}
+
+type CookieObservation struct {
+	Status  string             `json:"status"`
+	Total   int                `json:"total"`
+	Invalid int                `json:"invalid"`
+	Items   []CookieAttributes `json:"items"`
+}
+
+type CookieAttributes struct {
+	Index        int    `json:"index"`
+	Name         string `json:"name"`
+	Secure       bool   `json:"secure"`
+	HTTPOnly     bool   `json:"httpOnly"`
+	SameSite     string `json:"sameSite"`
+	DomainScoped bool   `json:"domainScoped"`
+	PathRoot     bool   `json:"pathRoot"`
+	Partitioned  bool   `json:"partitioned"`
 }
 
 type TLSObservation struct {
-	Authorized bool   `json:"authorized"`
-	Protocol   string `json:"protocol"`
-	ValidTo    string `json:"validTo"`
+	Authorized          bool     `json:"authorized"`
+	Protocol            string   `json:"protocol"`
+	ValidTo             string   `json:"validTo"`
+	ValidFrom           string   `json:"validFrom,omitempty"`
+	Subject             string   `json:"subject,omitempty"`
+	Issuer              string   `json:"issuer,omitempty"`
+	DNSNames            []string `json:"dnsNames,omitempty"`
+	DNSNamesTruncated   bool     `json:"dnsNamesTruncated,omitempty"`
+	FingerprintSHA256   string   `json:"fingerprintSha256,omitempty"`
+	SerialNumber        string   `json:"serialNumber,omitempty"`
+	SignatureAlgorithm  string   `json:"signatureAlgorithm,omitempty"`
+	PublicKeyAlgorithm  string   `json:"publicKeyAlgorithm,omitempty"`
+	PublicKeyBits       int      `json:"publicKeyBits,omitempty"`
+	CipherSuite         string   `json:"cipherSuite,omitempty"`
+	NegotiatedProtocol  string   `json:"negotiatedProtocol,omitempty"`
+	VerifiedChainLength int      `json:"verifiedChainLength,omitempty"`
+}
+
+type SecurityTXTObservation struct {
+	URL              string   `json:"url"`
+	Status           string   `json:"status"`
+	HTTPStatus       int      `json:"httpStatus,omitempty"`
+	ContactCount     int      `json:"contactCount"`
+	Expires          string   `json:"expires,omitempty"`
+	CanonicalPresent bool     `json:"canonicalPresent"`
+	CanonicalMatches bool     `json:"canonicalMatches"`
+	Signed           bool     `json:"signed"`
+	Issues           []string `json:"issues"`
 }
 
 type Observation struct {
-	URL        string           `json:"url"`
-	Hostname   string           `json:"hostname"`
-	Address    string           `json:"address,omitempty"`
-	Addresses  []string         `json:"addresses"`
-	ObservedAt string           `json:"observedAt"`
-	HTTP       *HTTPObservation `json:"http,omitempty"`
-	TLS        *TLSObservation  `json:"tls,omitempty"`
-	DNS        *DNSObservation  `json:"dns,omitempty"`
+	URL         string                  `json:"url"`
+	Hostname    string                  `json:"hostname"`
+	Address     string                  `json:"address,omitempty"`
+	Addresses   []string                `json:"addresses"`
+	ObservedAt  string                  `json:"observedAt"`
+	HTTP        *HTTPObservation        `json:"http,omitempty"`
+	TLS         *TLSObservation         `json:"tls,omitempty"`
+	DNS         *DNSObservation         `json:"dns,omitempty"`
+	SecurityTXT *SecurityTXTObservation `json:"securityTxt,omitempty"`
 }
 
 type Report struct {

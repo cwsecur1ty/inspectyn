@@ -55,6 +55,8 @@ jobs:
         run: go test -race ./...
       - name: Build native executable
         run: go build ./cmd/inspectyn
+      - name: Build optional web interface
+        run: go build ./cmd/inspectyn-web
   containers:
     name: Container smoke tests
     runs-on: ubuntu-latest

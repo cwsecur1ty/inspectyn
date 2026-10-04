@@ -5,6 +5,8 @@ spectyn.json
 inspectyn.json
 /inspectyn
 /inspectyn.exe
+/inspectyn-web
+/inspectyn-web.exe
 /release/
 *.log
 .env*

@@ -18,6 +18,9 @@ func Run(ctx context.Context, kind string, config Config, collector TargetCollec
 	}
 	config.Targets = append([]string(nil), config.Targets...)
 	if kind == "recon" {
+		if config.SecurityTXT {
+			return Report{}, fmt.Errorf("securityTxt requires scan; recon makes no HTTPS requests")
+		}
 		for i, target := range config.Targets {
 			normalized, err := NormalizeReconTarget(target)
 			if err != nil {
@@ -76,11 +79,13 @@ func Run(ctx context.Context, kind string, config Config, collector TargetCollec
 	report := Report{SchemaVersion: 1, Tool: Tool{Name: "inspectyn", Version: Version}, Kind: kind,
 		GeneratedAt: now.Format(time.RFC3339Nano), Complete: true, Targets: config.Targets,
 		Findings: []Finding{}, Errors: []CheckError{}, Observations: []Observation{},
-		Context: map[string]any{"dns": config.DNS, "concurrency": config.Concurrency,
+		Context: map[string]any{"dns": config.DNS, "dnsDetails": config.DNSDetails, "securityTxt": config.SecurityTXT, "concurrency": config.Concurrency,
 			"maxTargets": MaxTargets, "timeoutMsPerPhase": config.TimeoutMS,
 			"scope": "Exact configured names; no crawling, subdomain enumeration or redirect following."}}
 	if kind == "recon" {
 		report.Context["scope"] = "DNS records for exact configured names. No HTTPS requests or subdomain enumeration."
+	} else if config.SecurityTXT {
+		report.Context["scope"] = "Configured HTTPS endpoints and each origin's /.well-known/security.txt; no crawling, subdomain enumeration or redirect following."
 	}
 	for _, result := range results {
 		if result.observation.Hostname != "" {

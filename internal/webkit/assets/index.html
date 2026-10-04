@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Inspectyn | Local console</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to workbench</a>
+  <header class="topbar">
+    <h1>Inspectyn</h1>
+    <div class="session-state"><span id="connection-state">Connecting</span><span id="version"></span></div>
+  </header>
+  <main id="main" class="workspace">
+    <div id="connection-error" class="notice error-notice" hidden><p id="connection-message"></p><button id="reconnect" class="button secondary" type="button">Reconnect</button></div>
+    <div class="workbench">
+      <aside class="sidebar" aria-label="Run configuration and history">
+        <section class="panel run-panel" aria-labelledby="run-heading">
+          <div class="panel-heading"><h2 id="run-heading">New run</h2><span id="target-limit" class="quiet">Up to 20 targets</span></div>
+          <form id="run-form" novalidate>
+            <fieldset class="mode-picker"><legend>Check type</legend><div class="mode-options"><label><input type="radio" name="kind" value="scan" checked><span>HTTPS scan</span></label><label><input type="radio" name="kind" value="recon"><span>DNS recon</span></label></div></fieldset>
+            <p id="mode-help" class="field-help">One HTTPS response per endpoint. Redirects are not followed.</p>
+            <div class="field-label"><label for="targets">Targets</label><span id="target-count" class="quiet">0 / 20</span></div>
+            <textarea id="targets" name="targets" rows="5" required spellcheck="false" autocapitalize="none" autocomplete="off" aria-describedby="target-help target-error" placeholder="https://your-domain.com&#10;https://api.your-domain.com/health"></textarea>
+            <p id="target-help" class="field-help">One authorized HTTPS URL per line. Public hosts on port 443 only.</p>
+            <p id="target-error" class="field-error" hidden></p>
+            <details id="advanced" class="advanced"><summary>Run options</summary><div class="advanced-fields">
+              <label class="checkbox-label"><input id="dns" type="checkbox" checked><span>Include SPF, DMARC, and MX</span></label>
+              <p class="field-help">Address lookups always run. Mail policies are checked at the exact hostname.</p>
+              <label class="checkbox-label"><input id="dns-details" type="checkbox"><span>DNS details (NS and canonical name)</span></label>
+              <label class="checkbox-label"><input id="security-txt" type="checkbox" aria-describedby="security-txt-help"><span>Check security.txt (one extra request)</span></label>
+              <p id="security-txt-help" class="field-help">HTTPS scans only. Requests /.well-known/security.txt at each target's origin.</p>
+              <div class="field-pair"><div><label for="timeout">Phase timeout (ms)</label><input id="timeout" type="number" min="1000" max="30000" step="1" value="10000" required inputmode="numeric"></div><div><label for="concurrency">Concurrent targets</label><input id="concurrency" type="number" min="1" max="16" step="1" value="4" required inputmode="numeric"></div></div>
+              <label for="fail-on">Severity gate</label><select id="fail-on"><option value="info">Info and above</option><option value="low">Low and above</option><option value="medium">Medium and above</option><option value="high" selected>High and above</option><option value="critical">Critical only</option><option value="none">No severity gate</option></select>
+              <p class="field-help">Incomplete checks still return exit code 2 when the gate is disabled.</p>
+            </div></details>
+            <div id="form-error" class="notice error-notice" tabindex="-1" role="alert" hidden></div>
+            <button id="start-run" class="button primary" type="submit" disabled>Run HTTPS checks</button>
+            <p id="active-notice" class="active-notice" hidden>A run is already in progress. <button id="view-active" class="text-button" type="button">View active run</button></p>
+          </form>
+        </section>
+        <section class="history-panel" aria-labelledby="history-heading"><div class="panel-heading"><h2 id="history-heading">Recent runs</h2><span id="history-count" class="quiet"></span></div><p id="history-empty" class="field-help">No runs in this session.</p><ol id="history-list" class="history-list"></ol><p id="history-note" class="history-note">The latest 10 runs stay in server memory. Download reports before stopping Inspectyn.</p></section>
+      </aside>
+      <section class="panel output-panel" aria-labelledby="output-heading">
+        <div class="output-topline"><h2 id="output-heading">Results</h2><span id="output-label" class="quiet">No run selected</span></div>
+        <div id="empty-output" class="empty-output"><h3>No results yet</h3><p>Enter your targets and run a check to view findings and records.</p></div>
+        <div id="job-output" hidden>
+          <div class="job-heading"><div><div class="job-title-row"><h3 id="job-title"></h3><span id="job-state" class="status-badge"></span></div><p id="job-meta" class="field-help"></p></div><button id="cancel-run" type="button" class="button danger" hidden>Cancel run</button></div>
+          <div id="running-state" class="running-state" hidden><progress aria-label="Run in progress"></progress><p id="running-copy">Checks are running. Results will appear when the run finishes.</p></div>
+          <p id="job-error" class="notice error-notice" hidden></p>
+          <div id="report-output" hidden>
+            <div class="report-toolbar"><p id="report-summary"></p><div class="download-controls"><label class="sr-only" for="download-format">Download format</label><select id="download-format"><option value="json">JSON</option><option value="html">HTML</option><option value="markdown">Markdown</option><option value="text">Text</option></select><button id="download-report" type="button" class="button secondary">Download</button></div></div>
+            <p id="download-error" class="notice error-notice" role="alert" hidden></p>
+            <p id="report-coverage" class="coverage-note"></p>
+            <section id="report-errors" class="report-errors" aria-labelledby="errors-heading" hidden><h4 id="errors-heading">Checks not completed</h4><ul id="errors-list"></ul></section>
+            <div class="result-tabs" role="tablist" aria-label="Report views"><button id="findings-tab" type="button" role="tab" aria-selected="true" aria-controls="findings-view" tabindex="0">Findings</button><button id="observations-tab" type="button" role="tab" aria-selected="false" aria-controls="observations-view" tabindex="-1">Observations</button></div>
+            <div id="findings-view" class="result-view" role="tabpanel" aria-labelledby="findings-tab" tabindex="0"><div id="findings-list"></div><button id="show-more" type="button" class="button secondary" hidden>Show more findings</button></div>
+            <div id="observations-view" class="result-view" role="tabpanel" aria-labelledby="observations-tab" tabindex="0" hidden><div id="observations-list"></div></div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+  <p id="announcements" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></p>
+  <noscript><p class="notice">Enable JavaScript to use this console. The Inspectyn CLI remains available in your terminal.</p></noscript>
+</body>
+</html>

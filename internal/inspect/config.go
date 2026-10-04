@@ -16,6 +16,8 @@ type Config struct {
 	SchemaVersion int      `json:"schemaVersion"`
 	Targets       []string `json:"targets"`
 	DNS           bool     `json:"dns"`
+	DNSDetails    bool     `json:"dnsDetails,omitempty"`
+	SecurityTXT   bool     `json:"securityTxt,omitempty"`
 	TimeoutMS     int      `json:"timeoutMs"`
 	Concurrency   int      `json:"-"`
 }

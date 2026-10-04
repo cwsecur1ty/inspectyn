@@ -340,6 +340,7 @@ func EvaluateObservation(ob Observation, now time.Time) []Finding {
 		findings = append(findings, Finding{RuleID: ruleID, Severity: severity, Title: title, Evidence: evidence, Remediation: remediation, Target: target, State: state})
 	}
 	evaluateHTTP(ob, add)
+	evaluateWebMetadata(ob, now, add)
 	if ob.TLS != nil {
 		if !ob.TLS.Authorized {
 			add("SPECTYN_TLS_INVALID", "high", "TLS certificate verification failed", "The TLS observation does not confirm successful certificate and hostname verification.", "Verify the certificate hostname, validity and chain before relying on the other TLS observations.", "Not assessable")
@@ -372,6 +373,14 @@ func EvaluateObservation(ob Observation, now time.Time) []Finding {
 			result DNSResult
 		}{{"A", ob.DNS.A}, {"AAAA", ob.DNS.AAAA}, {"SPF", ob.DNS.SPF}, {"DMARC", ob.DNS.DMARC}, {"MX", ob.DNS.MX}} {
 			if query.result.Status == "error" {
+				incomplete = append(incomplete, query.name)
+			}
+		}
+		for _, query := range []struct {
+			name   string
+			result *DNSResult
+		}{{"NS", ob.DNS.NS}, {"canonical name", ob.DNS.CNAME}} {
+			if query.result != nil && query.result.Status == "error" {
 				incomplete = append(incomplete, query.name)
 			}
 		}

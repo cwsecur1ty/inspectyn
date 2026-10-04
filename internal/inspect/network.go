@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/netip"
@@ -16,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 const maxHeaderBytes = 32768
@@ -27,6 +29,8 @@ type DNSResolver interface {
 	LookupIP(context.Context, string, string) ([]net.IP, error)
 	LookupTXT(context.Context, string) ([]string, error)
 	LookupMX(context.Context, string) ([]*net.MX, error)
+	LookupNS(context.Context, string) ([]*net.NS, error)
+	LookupCNAME(context.Context, string) (string, error)
 }
 
 type Collector struct {
@@ -145,7 +149,7 @@ func filterRecords(result DNSResult, expression *regexp.Regexp) DNSResult {
 var spfVersion = regexp.MustCompile(`(?i)^v=spf1(?:\s|$)`)
 var dmarcVersion = regexp.MustCompile(`(?i)^v\s*=\s*DMARC1(?:;|\s|$)`)
 
-func (c *Collector) resolve(ctx context.Context, hostname string, includeMail bool) *DNSObservation {
+func (c *Collector) resolve(ctx context.Context, hostname string, includeMail, includeDetails bool) *DNSObservation {
 	resolver := c.Resolver
 	if resolver == nil {
 		resolver = &net.Resolver{PreferGo: true, StrictErrors: true}
@@ -199,8 +203,57 @@ func (c *Collector) resolve(ctx context.Context, hostname string, includeMail bo
 			dns.MX = dnsResult(records, err)
 		}()
 	}
+	if includeDetails {
+		dns.NS, dns.CNAME = &DNSResult{}, &DNSResult{}
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			nameservers, err := resolver.LookupNS(ctx, hostname)
+			records := make([]string, 0, len(nameservers))
+			for _, nameserver := range nameservers {
+				if nameserver == nil || !validDNSName(nameserver.Host) {
+					err = failNetwork("DNS_INVALID_RECORD", "The resolver returned an invalid NS record.")
+					break
+				}
+				records = append(records, strings.ToLower(nameserver.Host))
+			}
+			*dns.NS = dnsResult(records, err)
+		}()
+		go func() {
+			defer wg.Done()
+			canonical, err := resolver.LookupCNAME(ctx, hostname)
+			records := []string{}
+			if err == nil {
+				if !validDNSName(canonical) {
+					err = failNetwork("DNS_INVALID_RECORD", "The resolver returned an invalid canonical name.")
+				} else if !strings.EqualFold(strings.TrimSuffix(canonical, "."), hostname) {
+					// LookupCNAME returns the final resolver result, not the alias chain.
+					records = append(records, strings.ToLower(canonical))
+				}
+			}
+			*dns.CNAME = dnsResult(records, err)
+		}()
+	}
 	wg.Wait()
 	return dns
+}
+
+func validDNSName(value string) bool {
+	value = strings.TrimSuffix(value, ".")
+	if value == "" || len(value) > 253 {
+		return false
+	}
+	for _, label := range strings.Split(value, ".") {
+		if len(label) == 0 || len(label) > 63 {
+			return false
+		}
+		for _, character := range label {
+			if !(character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' || character >= '0' && character <= '9' || character == '-' || character == '_') {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func addressMatches(connection net.Conn, expected netip.Addr) bool {
@@ -218,11 +271,16 @@ var retainedHeaders = map[string]bool{
 	"referrer-policy": true, "permissions-policy": true,
 }
 
-func (c *Collector) request(ctx context.Context, target, address string) (*HTTPObservation, *TLSObservation, error) {
+func (c *Collector) requestResponse(ctx context.Context, target, address string) (*http.Response, func(), error) {
 	if !IsPublicAddress(address) {
 		return nil, nil, failNetwork("DESTINATION_BLOCKED", "The connection address is not public.")
 	}
-	u, _ := url.Parse(target)
+	normalized, err := NormalizeTarget(target)
+	if err != nil {
+		return nil, nil, failNetwork("INVALID_TARGET", "The request target is not a valid HTTPS URL.")
+	}
+	target = normalized
+	u, _ := url.Parse(normalized)
 	expected, _ := netip.ParseAddr(address)
 	dial := c.DialContext
 	if dial == nil {
@@ -245,10 +303,11 @@ func (c *Collector) request(ctx context.Context, target, address string) (*HTTPO
 			return connection, nil
 		},
 	}
-	defer transport.CloseIdleConnections()
+	cleanup := func() { transport.CloseIdleConnections() }
 	client := &http.Client{Transport: transport, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
+		cleanup()
 		return nil, nil, err
 	}
 	req.Header.Set("User-Agent", "Inspectyn/"+Version)
@@ -256,12 +315,26 @@ func (c *Collector) request(ctx context.Context, target, address string) (*HTTPO
 	req.Close = true
 	response, err := client.Do(req)
 	if err != nil {
+		cleanup()
 		return nil, nil, err
 	}
-	defer response.Body.Close()
+	cleanup = func() {
+		response.Body.Close()
+		transport.CloseIdleConnections()
+	}
 	if response.TLS == nil || len(response.TLS.VerifiedChains) == 0 || len(response.TLS.PeerCertificates) == 0 {
+		cleanup()
 		return nil, nil, failNetwork("TLS_DESTINATION_MISMATCH", "The connection did not provide a verified TLS certificate.")
 	}
+	return response, cleanup, nil
+}
+
+func (c *Collector) request(ctx context.Context, target, address string) (*HTTPObservation, *TLSObservation, error) {
+	response, cleanup, err := c.requestResponse(ctx, target, address)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer cleanup()
 	headers := make(map[string][]string)
 	for name, values := range response.Header {
 		lower := strings.ToLower(name)
@@ -269,9 +342,40 @@ func (c *Collector) request(ctx context.Context, target, address string) (*HTTPO
 			headers[lower] = append([]string{}, values...)
 		}
 	}
-	certificate := response.TLS.PeerCertificates[0]
-	tlsObservation := &TLSObservation{Authorized: true, Protocol: tls.VersionName(response.TLS.Version), ValidTo: certificate.NotAfter.UTC().Format(time.RFC3339Nano)}
-	return &HTTPObservation{Status: response.StatusCode, Headers: headers}, tlsObservation, nil
+	return &HTTPObservation{Status: response.StatusCode, Headers: headers, Cookies: CaptureCookies(response.Header)}, observeTLS(response.TLS), nil
+}
+
+func (c *Collector) requestSecurityTXT(ctx context.Context, target, address string, now time.Time) (*SecurityTXTObservation, error) {
+	failure := func(code string, status int) *SecurityTXTObservation {
+		return &SecurityTXTObservation{URL: target, Status: "error", HTTPStatus: status, Issues: []string{code}}
+	}
+	response, cleanup, err := c.requestResponse(ctx, target, address)
+	if err != nil {
+		return failure(safeNetworkError(target, err).Code, 0), err
+	}
+	defer cleanup()
+	contentTypes := response.Header.Values("Content-Type")
+	contentType := ""
+	if response.StatusCode == http.StatusOK && len(contentTypes) > 1 {
+		return failure("AMBIGUOUS_CONTENT_TYPE", response.StatusCode), failNetwork("SECURITY_TXT_INCOMPLETE", "The security.txt response has ambiguous content types.")
+	}
+	if len(contentTypes) == 1 {
+		contentType = contentTypes[0]
+	}
+	var body []byte
+	if response.StatusCode == http.StatusOK {
+		body, err = io.ReadAll(io.LimitReader(response.Body, maxSecurityTXTBytes+1))
+		if err != nil {
+			return failure("BODY_READ_FAILED", response.StatusCode), err
+		}
+		if len(body) > maxSecurityTXTBytes {
+			return failure("BODY_LIMIT", response.StatusCode), failNetwork("SECURITY_TXT_INCOMPLETE", "The security.txt response exceeds the body limit.")
+		}
+		if !utf8.Valid(body) {
+			return failure("INVALID_UTF8", response.StatusCode), failNetwork("SECURITY_TXT_INCOMPLETE", "The security.txt response is not valid UTF-8.")
+		}
+	}
+	return ParseSecurityTXT(target, response.StatusCode, contentType, body, now), nil
 }
 
 func (c *Collector) Collect(ctx context.Context, target string, config Config, kind string) (Observation, []CheckError) {
@@ -300,13 +404,21 @@ func (c *Collector) Collect(ctx context.Context, target string, config Config, k
 		timeout = 10 * time.Second
 	}
 	dnsCtx, cancelDNS := context.WithTimeout(ctx, timeout)
-	observation.DNS = c.resolve(dnsCtx, u.Hostname(), config.DNS)
+	observation.DNS = c.resolve(dnsCtx, u.Hostname(), config.DNS, config.DNSDetails)
 	cancelDNS()
 	for _, entry := range []struct {
 		name string
 		data DNSResult
 	}{{"A", observation.DNS.A}, {"AAAA", observation.DNS.AAAA}, {"SPF", observation.DNS.SPF}, {"DMARC", observation.DNS.DMARC}, {"MX", observation.DNS.MX}} {
 		if entry.data.Status == "error" {
+			errorsFound = append(errorsFound, CheckError{Target: normalized, Code: "DNS_CHECK_INCOMPLETE", Message: entry.name + " DNS evidence could not be retrieved."})
+		}
+	}
+	for _, entry := range []struct {
+		name string
+		data *DNSResult
+	}{{"NS", observation.DNS.NS}, {"canonical name", observation.DNS.CNAME}} {
+		if entry.data != nil && entry.data.Status == "error" {
 			errorsFound = append(errorsFound, CheckError{Target: normalized, Code: "DNS_CHECK_INCOMPLETE", Message: entry.name + " DNS evidence could not be retrieved."})
 		}
 	}
@@ -331,10 +443,19 @@ func (c *Collector) Collect(ctx context.Context, target string, config Config, k
 	}
 	observation.Address = observation.Addresses[0]
 	httpCtx, cancelHTTP := context.WithTimeout(ctx, timeout)
-	defer cancelHTTP()
 	observation.HTTP, observation.TLS, err = c.request(httpCtx, normalized, observation.Address)
+	cancelHTTP()
 	if err != nil {
 		errorsFound = append(errorsFound, safeNetworkError(normalized, err))
+	}
+	if config.SecurityTXT {
+		securityURL := "https://" + u.Host + "/.well-known/security.txt"
+		securityCtx, cancelSecurity := context.WithTimeout(ctx, timeout)
+		observation.SecurityTXT, err = c.requestSecurityTXT(securityCtx, securityURL, observation.Address, now())
+		cancelSecurity()
+		if err != nil {
+			errorsFound = append(errorsFound, CheckError{Target: normalized, Code: "SECURITY_TXT_INCOMPLETE", Message: "The security.txt check could not complete."})
+		}
 	}
 	return observation, errorsFound
 }

@@ -17,11 +17,12 @@ import (
 	"github.com/cwsecur1ty/inspectyn/internal/inspect"
 )
 
-const help = `Inspectyn - TLS, HTTP header and DNS checks
+const help = `Inspectyn - TLS, HTTP and DNS checks
 
 Usage:
   inspectyn scan --target https://example.com
   inspectyn recon --target example.com
+  inspectyn scan --target https://example.com --dns-details --security-txt
   inspectyn scan --list targets.txt --concurrency 4 --format json
   inspectyn scan --config inspectyn.json --out report.json --format json
   inspectyn init [--target https://example.com] [--out inspectyn.json]
@@ -33,13 +34,16 @@ Options:
   --concurrency   Concurrent targets, 1-16 (default 4; one per hostname)
   --timeout-ms    DNS and HTTPS phase deadline, 1000-30000 (default 10000)
   --no-dns        Skip SPF, DMARC and MX queries; address lookups still run
+  --dns-details   Also query NS and the resolver's canonical name
+  --security-txt  Check /.well-known/security.txt (scan only; one extra GET)
   --format        text, json, markdown or html (default text)
   --out           Write a new file instead of stdout
   --fail-on       info, low, medium, high, critical or none (default high)
   --help, -h      Show help
   --version, -v   Show version
 
-scan: one HTTPS request per configured public endpoint; no redirects.
+scan: one HTTPS request per public endpoint, plus optional security.txt.
+TLS and cookie attributes come from the endpoint response; no redirects.
 recon: DNS records for exact names; no endpoint requests or enumeration.
 Exit codes: 0 below threshold, 1 threshold reached, 2 error or incomplete.
 Offline evidence review and saved reports: inspectyn-js review / report.
@@ -124,7 +128,7 @@ func runWithCollector(ctx context.Context, args []string, stdout, stderr io.Writ
 	options.SetOutput(io.Discard)
 	var target, listPath, configPath, format, outPath, failOn string
 	var concurrency, timeoutMS int
-	var noDNS, showHelp bool
+	var noDNS, dnsDetails, securityTXT, showHelp bool
 	options.StringVar(&target, "target", "", "target")
 	options.StringVar(&target, "u", "", "target")
 	options.StringVar(&outPath, "out", "", "output file")
@@ -139,6 +143,8 @@ func runWithCollector(ctx context.Context, args []string, stdout, stderr io.Writ
 		options.IntVar(&concurrency, "concurrency", 4, "concurrent targets")
 		options.IntVar(&timeoutMS, "timeout-ms", 10000, "phase timeout")
 		options.BoolVar(&noDNS, "no-dns", false, "skip mail records")
+		options.BoolVar(&dnsDetails, "dns-details", false, "query NS and canonical name")
+		options.BoolVar(&securityTXT, "security-txt", false, "check security.txt")
 	}
 	// Duplicate aliases can silently replace the intended target with flag.Parse.
 	seen := map[string]bool{}
@@ -251,6 +257,12 @@ func runWithCollector(ctx context.Context, args []string, stdout, stderr io.Writ
 	}
 	if noDNS {
 		config.DNS = false
+	}
+	if seen["dns-details"] {
+		config.DNSDetails = dnsDetails
+	}
+	if seen["security-txt"] {
+		config.SecurityTXT = securityTXT
 	}
 	if outPath != "" {
 		if _, err := os.Lstat(outPath); err == nil {

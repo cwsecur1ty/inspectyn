@@ -3,6 +3,7 @@ package inspect
 import (
 	"context"
 	"net/url"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -128,5 +129,34 @@ func TestReconCanonicalizesWithoutMutatingInput(t *testing.T) {
 	}
 	if config.Targets[0] != "example.com" || report.Kind != "recon" {
 		t.Fatal("mutated input or lost recon kind")
+	}
+}
+
+func TestExpandedChecksContributeFindingsAndCoverage(t *testing.T) {
+	config := DefaultConfig()
+	config.Targets = []string{"https://example.com"}
+	config.DNSDetails, config.SecurityTXT = true, true
+	report, err := Run(context.Background(), "scan", config, collectorFunc(func(_ context.Context, target string, _ Config, _ string) (Observation, []CheckError) {
+		ob := healthyObservation(target)
+		ob.DNS = &DNSObservation{NS: &DNSResult{Status: "error", Records: []string{}}, CNAME: &DNSResult{Status: "ok", Records: []string{"edge.example.com"}}}
+		ob.HTTP.Cookies = &CookieObservation{Status: "ok", Total: 1, Items: []CookieAttributes{{Index: 1, Name: "session", SameSite: "lax"}}}
+		return ob, nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Complete || report.Context["dnsDetails"] != true || report.Context["securityTxt"] != true {
+		t.Fatalf("missing coverage state: %+v", report)
+	}
+	seenCookie, seenDNS := false, false
+	for _, finding := range report.Findings {
+		seenCookie = seenCookie || finding.RuleID == "INSPECTYN_COOKIE_SECURE_MISSING"
+		seenDNS = seenDNS || (finding.RuleID == "SPECTYN_DNS_CHECK_INCOMPLETE" && strings.Contains(finding.Evidence, "NS"))
+	}
+	if !seenCookie || !seenDNS {
+		t.Fatalf("new checks did not feed report findings: %+v", report.Findings)
+	}
+	if code, err := ReportExitCode(report, "none"); err != nil || code != 2 {
+		t.Fatalf("incomplete DNS details passed the gate: %d %v", code, err)
 	}
 }

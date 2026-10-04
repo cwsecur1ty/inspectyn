@@ -5,9 +5,12 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"log"
@@ -28,6 +31,8 @@ type fakeResolver struct {
 	ip    func(context.Context, string, string) ([]net.IP, error)
 	txt   func(context.Context, string) ([]string, error)
 	mx    func(context.Context, string) ([]*net.MX, error)
+	ns    func(context.Context, string) ([]*net.NS, error)
+	cname func(context.Context, string) (string, error)
 	mu    sync.Mutex
 	calls []string
 }
@@ -66,6 +71,22 @@ func (r *fakeResolver) LookupMX(ctx context.Context, host string) ([]*net.MX, er
 		return r.mx(ctx, host)
 	}
 	return []*net.MX{{Host: "mail.company.com.", Pref: 10}}, nil
+}
+
+func (r *fakeResolver) LookupNS(ctx context.Context, host string) ([]*net.NS, error) {
+	r.remember("ns " + host)
+	if r.ns != nil {
+		return r.ns(ctx, host)
+	}
+	return []*net.NS{{Host: "ns1.company.com."}}, nil
+}
+
+func (r *fakeResolver) LookupCNAME(ctx context.Context, host string) (string, error) {
+	r.remember("cname " + host)
+	if r.cname != nil {
+		return r.cname(ctx, host)
+	}
+	return host + ".", nil
 }
 
 func TestPublicAddressBoundary(t *testing.T) {
@@ -129,7 +150,9 @@ func TestScanRejectsMixedAndIncompleteAddressAnswersBeforeContact(t *testing.T) 
 				t.Fatal("unsafe address contacted")
 				return nil, nil
 			}}
-			observation, failures := collector.Collect(context.Background(), "https://company.com", DefaultConfig(), "scan")
+			config := DefaultConfig()
+			config.SecurityTXT = true
+			observation, failures := collector.Collect(context.Background(), "https://company.com", config, "scan")
 			if len(failures) == 0 || observation.HTTP != nil || observation.DNS.SPF.Status != "ok" {
 				t.Fatalf("partial evidence lost: %+v %+v", observation, failures)
 			}
@@ -198,7 +221,7 @@ type addressedConn struct {
 
 func (c addressedConn) RemoteAddr() net.Addr { return c.address }
 
-func tlsFixture(t *testing.T, hostname string, handler http.Handler) (*httptest.Server, *x509.CertPool) {
+func tlsFixture(t *testing.T, hostname string, handler http.Handler, dnsNames ...string) (*httptest.Server, *x509.CertPool) {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -208,7 +231,10 @@ func tlsFixture(t *testing.T, hostname string, handler http.Handler) (*httptest.
 	if err != nil {
 		t.Fatal(err)
 	}
-	cert := &x509.Certificate{SerialNumber: serial, Subject: pkix.Name{CommonName: hostname}, DNSNames: []string{hostname}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), BasicConstraintsValid: true, IsCA: true, KeyUsage: x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
+	if len(dnsNames) == 0 {
+		dnsNames = []string{hostname}
+	}
+	cert := &x509.Certificate{SerialNumber: serial, Subject: pkix.Name{CommonName: hostname}, DNSNames: dnsNames, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), BasicConstraintsValid: true, IsCA: true, KeyUsage: x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
 	der, err := x509.CreateCertificate(rand.Reader, cert, cert, &key.PublicKey, key)
 	if err != nil {
 		t.Fatal(err)
@@ -250,7 +276,7 @@ func TestActualTLSRequestPinsDestinationAndPreservesRepeatedHeaders(t *testing.T
 		w.Header().Add("Content-Type", "application/json")
 		w.Header().Add("Strict-Transport-Security", "max-age=0")
 		w.Header().Add("Strict-Transport-Security", "max-age=100")
-		w.Header().Set("Set-Cookie", "SECRET_COOKIE")
+		w.Header().Set("Set-Cookie", "session=SECRET_COOKIE; Secure; HttpOnly; SameSite=Lax; Path=/")
 		w.Header().Set("Location", "http://127.0.0.1/")
 		w.WriteHeader(http.StatusFound)
 	}))
@@ -275,6 +301,241 @@ func TestActualTLSRequestPinsDestinationAndPreservesRepeatedHeaders(t *testing.T
 	}
 	if _, ok := observation.HTTP.Headers["location"]; ok {
 		t.Fatal("redirect destination retained")
+	}
+	certificate, err := x509.ParseCertificate(server.TLS.Certificates[0].Certificate[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	fingerprint := sha256.Sum256(certificate.Raw)
+	if observation.TLS.FingerprintSHA256 != hex.EncodeToString(fingerprint[:]) || observation.TLS.Subject != "CN=company.com" || observation.TLS.Issuer != "CN=company.com" || observation.TLS.PublicKeyAlgorithm != "ECDSA" || observation.TLS.PublicKeyBits != 256 || observation.TLS.VerifiedChainLength != 1 || observation.TLS.CipherSuite == "" || !reflect.DeepEqual(observation.TLS.DNSNames, []string{"company.com"}) {
+		t.Fatalf("TLS details: %+v", observation.TLS)
+	}
+	if observation.TLS.ValidFrom != certificate.NotBefore.UTC().Format(time.RFC3339Nano) || observation.TLS.SerialNumber != certificate.SerialNumber.Text(16) || observation.TLS.SignatureAlgorithm != certificate.SignatureAlgorithm.String() {
+		t.Fatalf("certificate identity: %+v", observation.TLS)
+	}
+	if observation.HTTP.Cookies == nil || observation.HTTP.Cookies.Total != 1 || observation.HTTP.Cookies.Items[0].Name != "session" {
+		t.Fatalf("cookie attributes missing: %+v", observation.HTTP.Cookies)
+	}
+	encoded, err := json.Marshal(observation)
+	if err != nil || strings.Contains(string(encoded), "SECRET_COOKIE") {
+		t.Fatalf("cookie value retained: %s %v", encoded, err)
+	}
+}
+
+func TestDNSDetailsOnlyQueryRequestedHostAndNeverExpandScope(t *testing.T) {
+	resolver := &fakeResolver{cname: func(_ context.Context, host string) (string, error) {
+		return "Service.OTHER.example.", nil
+	}}
+	collector := &Collector{Resolver: resolver, DialContext: func(context.Context, string, string) (net.Conn, error) {
+		t.Fatal("DNS reconnaissance contacted an endpoint")
+		return nil, nil
+	}}
+	config := DefaultConfig()
+	config.DNS, config.DNSDetails = false, true
+	observation, failures := collector.Collect(context.Background(), "company.com", config, "recon")
+	if len(failures) != 0 || observation.DNS.NS.Status != "ok" || observation.DNS.CNAME.Status != "ok" || !reflect.DeepEqual(observation.DNS.CNAME.Records, []string{"service.other.example."}) || observation.DNS.SPF.Status != "skipped" {
+		t.Fatalf("details: %+v %+v", observation.DNS, failures)
+	}
+	sort.Strings(resolver.calls)
+	want := []string{"cname company.com", "ip4 company.com", "ip6 company.com", "ns company.com"}
+	if !reflect.DeepEqual(resolver.calls, want) {
+		t.Fatalf("query scope: %v", resolver.calls)
+	}
+	config.DNSDetails = false
+	observation, failures = collector.Collect(context.Background(), "company.com", config, "recon")
+	if len(failures) != 0 || observation.DNS.NS != nil || observation.DNS.CNAME != nil {
+		t.Fatalf("default added detail queries: %+v %+v", observation.DNS, failures)
+	}
+}
+
+func TestDNSDetailsSeparateAbsenceInvalidAndFailure(t *testing.T) {
+	for _, scenario := range []struct {
+		name        string
+		canonical   string
+		nameservers []*net.NS
+		err         error
+		wantStatus  string
+		wantErrors  int
+	}{
+		{"same-name", "COMPANY.COM.", nil, nil, "absent", 0},
+		{"absent", "", nil, &net.DNSError{IsNotFound: true}, "absent", 0},
+		{"error", "", nil, errors.New("SECRET_RESOLVER_ERROR"), "error", 2},
+		{"invalid", "invalid name", []*net.NS{nil}, nil, "error", 2},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			resolver := &fakeResolver{
+				cname: func(context.Context, string) (string, error) { return scenario.canonical, scenario.err },
+				ns:    func(context.Context, string) ([]*net.NS, error) { return scenario.nameservers, scenario.err },
+			}
+			config := DefaultConfig()
+			config.DNSDetails = true
+			observation, failures := (&Collector{Resolver: resolver}).Collect(context.Background(), "company.com", config, "recon")
+			if observation.DNS.CNAME.Status != scenario.wantStatus || observation.DNS.NS.Status != scenario.wantStatus || len(failures) != scenario.wantErrors || observation.DNS.CNAME.Records == nil || observation.DNS.NS.Records == nil {
+				t.Fatalf("status: %+v %+v", observation.DNS, failures)
+			}
+			encoded, _ := json.Marshal(observation)
+			if strings.Contains(string(encoded), "SECRET") {
+				t.Fatal("raw DNS error exposed")
+			}
+		})
+	}
+}
+
+func TestSecurityTXTUsesOneFixedPathAndDoesNotFollowLinks(t *testing.T) {
+	paths := make(chan string, 3)
+	server, roots := tlsFixture(t, "company.com", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths <- r.URL.String()
+		if r.URL.Path == "/.well-known/security.txt" {
+			if r.Host != "company.com" || r.TLS.ServerName != "company.com" {
+				t.Error("security.txt changed connection identity")
+			}
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.Header().Set("Set-Cookie", "ignored=SECRET_FROM_SECURITY_TXT")
+			io.WriteString(w, "Contact: https://other.example/disclosure\nExpires: 2030-01-01T00:00:00Z\nCanonical: https://company.com/.well-known/security.txt\n")
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		io.WriteString(w, "<html>SECRET_BODY_NOT_RETAINED</html>")
+	}))
+	var dialed string
+	collector := testCollector(server, roots, &dialed)
+	config := DefaultConfig()
+	config.SecurityTXT = true
+	observation, failures := collector.Collect(context.Background(), "https://company.com/a%2Fb", config, "scan")
+	if len(failures) != 0 || observation.SecurityTXT == nil || observation.SecurityTXT.Status != "present" || observation.SecurityTXT.ContactCount != 1 || !observation.SecurityTXT.CanonicalMatches || dialed != "8.8.8.8:443" {
+		t.Fatalf("security.txt: %+v %+v", observation, failures)
+	}
+	if len(paths) != 2 || <-paths != "/a%2Fb" || <-paths != "/.well-known/security.txt" {
+		t.Fatalf("unexpected request scope: %v", paths)
+	}
+	encoded, _ := json.Marshal(observation)
+	if strings.Contains(string(encoded), "SECRET") || strings.Contains(string(encoded), "other.example") {
+		t.Fatal("response bodies, contact URLs or security.txt cookies leaked")
+	}
+}
+
+func TestSecurityTXTResponseBoundsAndPartialObservations(t *testing.T) {
+	for _, scenario := range []struct {
+		name         string
+		status       int
+		body         string
+		contentTypes []string
+		wantStatus   string
+		wantErrors   int
+	}{
+		{"missing", 404, "ignored", nil, "absent", 0},
+		{"missing-duplicate-type", 404, "ignored", []string{"text/plain", "text/html"}, "absent", 0},
+		{"redirect", 302, "ignored", nil, "redirect", 0},
+		{"server-error", 500, "ignored", nil, "unassessed", 0},
+		{"large", 200, strings.Repeat("a", maxSecurityTXTBytes+1), []string{"text/plain"}, "error", 1},
+		{"at-limit", 200, strings.Repeat("a", maxSecurityTXTBytes), []string{"text/plain"}, "invalid", 0},
+		{"utf8", 200, "\xff", []string{"text/plain"}, "error", 1},
+		{"duplicate-type", 200, "ignored", []string{"text/plain", "text/html"}, "error", 1},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			var requests atomic.Int32
+			server, roots := tlsFixture(t, "company.com", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				if r.URL.Path != "/.well-known/security.txt" {
+					w.Header().Set("Content-Type", "text/html")
+					w.WriteHeader(200)
+					return
+				}
+				for _, value := range scenario.contentTypes {
+					w.Header().Add("Content-Type", value)
+				}
+				w.Header().Set("Location", "https://other.example/secret")
+				w.WriteHeader(scenario.status)
+				io.WriteString(w, scenario.body)
+			}))
+			config := DefaultConfig()
+			config.SecurityTXT = true
+			observation, failures := testCollector(server, roots, nil).Collect(context.Background(), "https://company.com/", config, "scan")
+			if requests.Load() != 2 || observation.HTTP == nil || observation.TLS == nil || observation.SecurityTXT.Status != scenario.wantStatus || len(failures) != scenario.wantErrors {
+				t.Fatalf("partial evidence: %+v %+v requests=%d", observation, failures, requests.Load())
+			}
+			if len(failures) > 0 && failures[0].Code != "SECURITY_TXT_INCOMPLETE" {
+				t.Fatalf("error classification: %+v", failures)
+			}
+		})
+	}
+}
+
+func TestSecurityTXTDeadlineAndBaseFailureAreIndependent(t *testing.T) {
+	for _, timeoutPath := range []string{"/", "/.well-known/security.txt"} {
+		t.Run(timeoutPath, func(t *testing.T) {
+			var requests atomic.Int32
+			server, roots := tlsFixture(t, "company.com", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				if r.URL.Path == timeoutPath {
+					if timeoutPath != "/" {
+						w.Header().Set("Content-Type", "text/plain")
+						w.WriteHeader(200)
+						w.(http.Flusher).Flush()
+					}
+					<-r.Context().Done()
+					return
+				}
+				w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+				io.WriteString(w, "Contact: mailto:security@company.com\nExpires: 2030-01-01T00:00:00Z\n")
+			}))
+			config := DefaultConfig()
+			config.SecurityTXT, config.TimeoutMS = true, 200
+			started := time.Now()
+			observation, failures := testCollector(server, roots, nil).Collect(context.Background(), "https://company.com/", config, "scan")
+			if len(failures) != 1 || requests.Load() != 2 || time.Since(started) > 2*time.Second {
+				t.Fatalf("phase deadline: %+v requests=%d", failures, requests.Load())
+			}
+			if timeoutPath == "/" {
+				if observation.HTTP != nil || observation.SecurityTXT.Status != "present" || failures[0].Code != "ETIMEDOUT" {
+					t.Fatalf("base failure lost security.txt: %+v %+v", observation, failures)
+				}
+			} else if observation.HTTP == nil || observation.SecurityTXT.Status != "error" || failures[0].Code != "SECURITY_TXT_INCOMPLETE" {
+				t.Fatalf("body timeout lost base evidence: %+v %+v", observation, failures)
+			}
+		})
+	}
+}
+
+func TestSecurityTXTBodyReadHonorsCallerCancellation(t *testing.T) {
+	bodyStarted := make(chan struct{})
+	server, roots := tlsFixture(t, "company.com", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/.well-known/security.txt" {
+			w.WriteHeader(200)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(200)
+		w.(http.Flusher).Flush()
+		close(bodyStarted)
+		<-r.Context().Done()
+	}))
+	config := DefaultConfig()
+	config.SecurityTXT = true
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	type result struct {
+		observation Observation
+		failures    []CheckError
+	}
+	completed := make(chan result, 1)
+	go func() {
+		observation, failures := testCollector(server, roots, nil).Collect(ctx, "https://company.com/", config, "scan")
+		completed <- result{observation, failures}
+	}()
+	select {
+	case <-bodyStarted:
+		cancel()
+	case <-time.After(2 * time.Second):
+		t.Fatal("security.txt body read did not start")
+	}
+	select {
+	case got := <-completed:
+		if got.observation.HTTP == nil || got.observation.SecurityTXT.Status != "error" || len(got.failures) != 1 || got.failures[0].Code != "SECURITY_TXT_INCOMPLETE" {
+			t.Fatalf("cancellation lost evidence: %+v %+v", got.observation, got.failures)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("caller cancellation did not terminate the body read")
 	}
 }
 

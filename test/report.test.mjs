@@ -42,6 +42,31 @@ test('native DNS recon reports round-trip through all JavaScript report formats'
   }
 });
 
+test('expanded native observations survive offline report conversion', () => {
+  const expanded = report({
+    tool: { name: 'inspectyn', version: '0.3.0-dev' }, kind: 'scan', findings: [],
+    observations: [{
+      url: 'https://example.com/', hostname: 'example.com', addresses: ['93.184.215.14'], observedAt: '2026-10-04T10:00:00Z',
+      dns: { ns: { status: 'ok', records: ['ns.example.com.'] }, cname: { status: 'ok', records: ['edge.example.com.'] } },
+      tls: { authorized: true, protocol: 'TLSv1.3', validTo: '2027-01-01T00:00:00Z', issuer: 'CN=<script>fixture</script>', cipherSuite: 'TLS_AES_128_GCM_SHA256', fingerprintSha256: 'ab'.repeat(32), dnsNames: ['example.com'], publicKeyBits: 256 },
+      http: { status: 200, headers: {}, cookies: { status: 'ok', total: 1, invalid: 0, items: [{ index: 1, name: '__Host-session', secure: true, httpOnly: true, sameSite: 'lax', domainScoped: false, pathRoot: true, partitioned: false }] } },
+      securityTxt: { url: 'https://example.com/.well-known/security.txt', status: 'present', httpStatus: 200, contactCount: 1, expires: '2027-01-01T00:00:00Z', canonicalPresent: true, canonicalMatches: true, signed: false, issues: [] },
+    }],
+    context: { dnsDetails: true, securityTxt: true },
+  });
+  const before = structuredClone(expanded);
+  const json = JSON.parse(renderReport(expanded, 'json'));
+  assert.deepEqual(json.observations, expanded.observations);
+  assert.deepEqual(json.context, expanded.context);
+  assert.equal(reportExitCode(json), 0);
+  for (const format of ['text', 'markdown', 'html']) {
+    const output = renderReport(json, format);
+    for (const value of ['TLS_AES_128_GCM_SHA256', '__Host-session', 'securityTxt', 'contactCount', 'edge.example.com']) assert.ok(output.includes(value), `${format} lost ${value}`);
+  }
+  assert.doesNotMatch(renderReport(json, 'html'), /<script>/);
+  assert.deepEqual(expanded, before);
+});
+
 test('exit codes distinguish threshold, incomplete evidence and successful coverage', () => {
   assert.equal(reportExitCode(report()), 1);
   assert.equal(reportExitCode(report(), 'critical'), 0);

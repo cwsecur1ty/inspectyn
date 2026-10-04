@@ -1,9 +1,11 @@
 # Usage
 
-Version 0.2.0 provides two commands:
+Inspectyn provides two commands:
 
 - `inspectyn`: native Go executable for `scan`, `recon`, and `init`. No Node.js runtime is required.
 - `inspectyn-js`: optional Node.js command for offline `review` and saved `report` rendering. Requires Node.js 22.13 or later.
+
+The native 0.3.0 development version adds TLS connection details, cookie attribute checks, `--dns-details`, and `--security-txt`. Build from this source tree to use them; the published v0.2.0 release does not include these additions.
 
 ## Configuration
 
@@ -27,6 +29,8 @@ inspectyn init --target https://your-domain.com --out inspectyn.json
 | `schemaVersion` | Required; must be `1` |
 | `targets` | 1–20 distinct targets |
 | `dns` | Defaults to `true`; `false` skips SPF, DMARC, and MX queries |
+| `dnsDetails` | Defaults to `false`; `true` also queries NS and the resolver's canonical name |
+| `securityTxt` | Defaults to `false`; `true` adds one request for `/.well-known/security.txt`; scan only |
 | `timeoutMs` | 1,000–30,000 milliseconds per DNS/HTTPS phase; defaults to 10,000 |
 
 ```sh
@@ -34,6 +38,8 @@ inspectyn scan --config inspectyn.json --concurrency 4 --format json --out scan.
 ```
 
 `--timeout-ms` overrides the configured timeout. `--no-dns` skips mail-policy queries even when `dns` is `true`. Address lookups still run. Concurrency is a command-line option, not a JSON field: it accepts `1–16` and defaults to `4`. Checks for different hosts can run concurrently; checks for the same hostname are serialized.
+
+`--dns-details` and `--security-txt` enable their respective checks. Use `--dns-details=false` or `--security-txt=false` to override an enabled configuration field. DNS details are independent of `--no-dns`. Recon rejects `securityTxt: true`; disable it explicitly when reusing a scan configuration.
 
 ### Target files
 
@@ -60,13 +66,29 @@ Scan targets must be HTTPS URLs on port 443 with fully qualified ASCII DNS hostn
 
 For each target, Inspectyn resolves its addresses, checks that every returned address is public, and pins one HTTPS connection to a selected address. It verifies the certificate and hostname, reads one response, then closes the connection without analyzing the body. It does not follow redirects. Response headers are capped at 32 KiB. Timeouts apply per DNS/HTTPS phase, not to the entire scan.
 
+The verified connection supplies the leaf certificate's subject, issuer, validity dates, DNS names, serial number, SHA-256 fingerprint, signature and key algorithms, key size where available, negotiated TLS version and cipher suite, ALPN, and verified chain length. At most 64 DNS names are retained; truncation is marked. This describes the negotiated connection, not every TLS version or cipher the server supports.
+
+Cookie checks inspect `Set-Cookie` headers on the returned response, including redirects and error responses. Reports retain names and flags for Secure, HttpOnly, SameSite, Domain presence, root Path, and Partitioned. They omit cookie values and raw headers. At most 64 cookies are assessed; malformed or ambiguous attributes leave the assessment incomplete. Missing flags are review prompts: Inspectyn does not know whether a cookie carries authentication state or needs JavaScript access.
+
+### security.txt
+
+```sh
+inspectyn scan -u https://your-domain.com --security-txt
+```
+
+This opt-in check sends one extra GET to the same origin's `/.well-known/security.txt`, using the already validated address and a separate HTTPS phase deadline. It does not follow redirects, try a root-path fallback, or contact any listed URI. The body is limited to 64 KiB.
+
+Checks cover status, UTF-8 plain text, Contact presence and URI syntax, one parseable Expires field, expiry, and whether a supplied Canonical field includes the requested URL. Missing files are informational review items. Redirects, unsupported responses, nonmatching Canonical fields, and clear-signed files leave the assessment unresolved. OpenPGP signatures and contact channels are not verified; this is a subset of [RFC 9116](https://www.rfc-editor.org/rfc/rfc9116.html), not a full compliance check. Reports retain the request URL, status, contact count, expiry, canonical flags, and issue codes, not the body or contact URIs.
+
 ### DNS recon
 
 ```sh
 inspectyn recon -u example.com
 ```
 
-Recon queries A, AAAA, SPF, DMARC, and MX records for the exact configured names. It does not connect to any returned address, enumerate subdomains, or request an HTTPS endpoint. `--no-dns` limits the result to address lookups.
+Recon queries A, AAAA, SPF, DMARC, and MX records for the exact configured names. It does not connect to any returned address, enumerate subdomains, or request an HTTPS endpoint. `--no-dns` skips the three mail-record queries.
+
+Use `--dns-details` to also query NS and the resolver's canonical name. The `cname` observation is the final canonical name supplied by the resolver, not a raw CNAME record set or a complete alias chain. An unchanged canonical name is represented by an empty record list. An absent NS answer at a service hostname does not establish whether the parent zone has name servers. Returned names are never added as targets.
 
 DNS observations come from the machine's configured resolver. They are not independent authoritative-zone verification. A lookup failure is distinct from an absent record and leaves the report incomplete.
 
@@ -74,12 +96,15 @@ DNS observations come from the machine's configured resolver. They are not indep
 
 | Area | Coverage |
 | --- | --- |
-| TLS | Certificate verification, hostname match, and expiry |
+| TLS | Certificate verification, hostname match, expiry, leaf certificate and negotiated connection details |
 | HTTP | HSTS, content-type protection, CSP presence, and selected framing-policy checks |
+| Cookies | Attribute metadata and selected Secure, HttpOnly, SameSite and prefix checks; no values retained |
+| security.txt | Optional bounded request; selected format, required-field, expiry and Canonical checks |
 | A/AAAA | Addresses returned for the configured hostname |
 | SPF | Direct record presence, duplicates, and selected syntax/fallback checks |
 | DMARC | Direct record presence, duplicates, and selected policy checks |
 | MX | Records returned for the configured hostname |
+| NS / canonical name | Optional resolver queries for the exact configured hostname; no enumeration |
 
 SPF is queried at the exact target hostname; DMARC at `_dmarc.<hostname>`. Parent-domain DMARC inheritance and recursive SPF mechanisms are not evaluated. A missing direct record does not establish the effective mail policy or whether a hostname sends mail.
 
@@ -193,12 +218,12 @@ On Windows PowerShell 5.1, use `| Out-File -Encoding utf8 report.json` instead o
 
 Inspectyn has no telemetry or hosted storage. Offline reviews stay on the machine running them. Live scans contact the configured endpoint and DNS resolver. DNS recon contacts the resolver without connecting to the named endpoints.
 
-Normalized reviews exclude raw request/response bodies, replay commands, complete templates, and URL credentials, paths, and queries. Accepted titles and source labels remain supplied text. Scan and recon reports retain target names, selected headers, DNS observations, and available certificate metadata. Apply appropriate access controls to reports before sharing them.
+Normalized reviews exclude raw request/response bodies, replay commands, complete templates, and URL credentials, paths, and queries. Accepted titles and source labels remain supplied text. Scan and recon reports retain target names, selected headers, DNS observations, certificate metadata, cookie names and attribute flags, and security.txt assessment metadata when requested. Cookie values, raw Set-Cookie headers, security.txt bodies, and contact URIs are not retained. Apply appropriate access controls to reports before sharing them.
 
 ### Compatibility
 
 `inspectyn-js report` reads schema-version-1 reports from Inspectyn and the former Spectyn name, including native `scan` and `recon` reports. Historical `SPECTYN_` and `spectyn.*` rule IDs and the `spectyn-evidence/1.0` ruleset remain stable. Existing report provenance is preserved.
 
-The JavaScript `init` and `scan` commands remain available as `inspectyn-js init` and `inspectyn-js scan`. They keep the earlier sequential implementation and do not accept the native `--list`, `--concurrency`, or `recon` interface.
+The JavaScript `init` and `scan` commands remain available as `inspectyn-js init` and `inspectyn-js scan`. They keep the earlier sequential implementation and do not accept the native `--list`, `--concurrency`, `--dns-details`, `--security-txt`, or `recon` interface. Saved native reports retain their added metadata when rendered by `inspectyn-js report`.
 
 Results cover only the supplied evidence and requested checks. No findings does not establish that a target is secure.

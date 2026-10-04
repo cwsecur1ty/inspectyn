@@ -21,6 +21,8 @@ Inspectyn checks TLS certificates, HTTP security headers, and DNS records. It al
 
 The native Go binary handles scanning and DNS recon. The optional JavaScript command handles offline evidence review and saved reports. Scanning does not require Node.js.
 
+The local 0.3.0 development version adds certificate details, cookie attribute checks, optional NS and canonical-name lookups, and an optional `security.txt` check. These additions and the local web interface are not included in the published v0.2.0 release.
+
 ## Install
 
 Download a binary from [Releases](https://github.com/cwsecur1ty/inspectyn/releases/latest), or install with Go **1.24 or later**:
@@ -68,7 +70,16 @@ inspectyn init --target https://your-domain.com --out inspectyn.json
 inspectyn scan --config inspectyn.json --format html --out scan.html
 ```
 
-`scan` checks one response per public HTTPS endpoint on port 443. `recon` queries A, AAAA, SPF, DMARC, and MX records for exact names without connecting to the endpoints. Neither command enumerates hosts, crawls, follows redirects, or runs exploits.
+`scan` checks one response per public HTTPS endpoint on port 443. Certificate details and cookie attributes are collected from that response. `recon` queries A, AAAA, SPF, DMARC, and MX records for exact names without connecting to the endpoints. Neither command enumerates hosts, crawls, follows redirects, or runs exploits.
+
+Include additional DNS records and request the origin's `/.well-known/security.txt`:
+
+```sh
+inspectyn scan -u https://your-domain.com --dns-details --security-txt
+inspectyn recon -u your-domain.com --dns-details
+```
+
+The `security.txt` option makes one additional HTTPS request per target. Cookie values and the file's contents are not included in reports. See [coverage and limits](docs/usage.md#check-coverage).
 
 ## Options
 
@@ -80,6 +91,8 @@ inspectyn scan --config inspectyn.json --format html --out scan.html
 | `--concurrency` | Concurrent targets, `1–16`; default `4`, with one check per hostname |
 | `--timeout-ms` | DNS/HTTPS phase timeout, `1000–30000`; default `10000` |
 | `--no-dns` | Skip SPF, DMARC, and MX queries; address resolution still runs |
+| `--dns-details` | Also query NS and the resolver's canonical name |
+| `--security-txt` | Check `/.well-known/security.txt`; scan only, one extra request |
 | `--format` | `text`, `json`, `markdown`, or `html`; default `text` |
 | `--out` | Write a new file instead of stdout |
 | `--fail-on` | `info`, `low`, `medium`, `high`, `critical`, or `none`; default `high` |
@@ -114,6 +127,12 @@ Native scans produce all four report formats directly. To convert a saved JSON r
 inspectyn-js report scan.json --format html --out scan.html
 ```
 
+## Optional Local Web Interface
+
+The local `inspectyn-web` development scaffold adds a browser form for native `scan` and `recon` commands, job cancellation, and report downloads. Build it separately and run it alongside the CLI; no Node.js or frontend build is required.
+
+It listens only on `127.0.0.1`, retains recent jobs in memory, and preserves the CLI's public HTTPS and exact-name DNS scope. This addition is not part of the published v0.2.0 release. See [local web setup and boundaries](docs/web.md).
+
 ## Exit Codes
 
 | Code | Meaning |
@@ -132,6 +151,7 @@ inspectyn-js report scan.json --format html --out scan.html
 - [Offline reviews](docs/usage.md#offline-reviews)
 - [Docker](docs/usage.md#docker)
 - [Data handling and compatibility](docs/usage.md#data-handling)
+- [Optional local web interface](docs/web.md)
 - [Contributing](CONTRIBUTING.md) and [security reporting](SECURITY.md)
 
 ## License
