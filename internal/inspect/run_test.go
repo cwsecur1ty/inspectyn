@@ -108,6 +108,10 @@ func TestRunCancellationDoesNotStartTargetRequests(t *testing.T) {
 	if report.Complete || len(report.Errors) != 2 {
 		t.Fatal("cancellation was not recorded")
 	}
+	// Run and the collector must report cancellation with the same code.
+	if code := safeNetworkError("", context.Canceled).Code; report.Errors[0].Code != code {
+		t.Fatalf("cancellation code %q differs from collector code %q", report.Errors[0].Code, code)
+	}
 }
 
 func TestReconCanonicalizesWithoutMutatingInput(t *testing.T) {

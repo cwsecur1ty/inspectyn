@@ -1,5 +1,5 @@
 import { validateConfig } from './config.mjs';
-import { collectTarget, networkError } from './network.mjs';
+import { collectTarget, networkError, CERTIFICATE_ERROR_CODES } from './network.mjs';
 import { evaluateObservation } from './checks.mjs';
 
 export async function scan(input, collect = collectTarget) {
@@ -15,7 +15,7 @@ export async function scan(input, collect = collectTarget) {
       }
     } catch (error) {
       errors.push(networkError(target,error));
-      if (['CERT_HAS_EXPIRED','ERR_TLS_CERT_ALTNAME_INVALID','DEPTH_ZERO_SELF_SIGNED_CERT','UNABLE_TO_VERIFY_LEAF_SIGNATURE'].includes(error.code)) {
+      if (CERTIFICATE_ERROR_CODES.has(error.code)) {
         findings.push({ target,ruleId:'SPECTYN_TLS_INVALID',severity:'high',title:'TLS certificate verification failed',
           evidence:networkError(target,error).message,remediation:'Review the certificate hostname, validity and complete chain. Other checks remain incomplete.' });
       }

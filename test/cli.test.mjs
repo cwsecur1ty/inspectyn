@@ -85,6 +85,16 @@ test('scan partial failures keep successful evidence and cannot yield clean CI',
   assert.doesNotMatch(JSON.stringify(report),/sensitive remote diagnostic/);
 });
 
+test('scan reports every certificate verification failure as a TLS finding', async () => {
+  for (const code of ['SELF_SIGNED_CERT_IN_CHAIN','UNABLE_TO_GET_ISSUER_CERT_LOCALLY','CERT_NOT_YET_VALID']) {
+    const report = await scan({schemaVersion:1,targets:['https://one.company.com'],dns:false},async () => {
+      throw Object.assign(Error('sensitive remote diagnostic'),{code});
+    });
+    assert.deepEqual(report.findings.map(finding => finding.ruleId),['SPECTYN_TLS_INVALID'],code);
+    assert.doesNotMatch(report.errors[0].message,/could not complete/,code);
+  }
+});
+
 test('unknown severity cannot silently pass a gate and malformed JSON never echoes evidence', async () => {
   const args = ['review','cve-applicability','--input',join(root,'examples/inventory.json'),'--advisory',join(root,'examples/advisory.json'),'--format','json'];
   const gated = run(...args);

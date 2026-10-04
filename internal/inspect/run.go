@@ -62,11 +62,11 @@ func Run(ctx context.Context, kind string, config Config, collector TargetCollec
 					if ctx.Err() == nil {
 						results[index].observation, results[index].errors = collector.Collect(ctx, target, config, kind)
 					} else {
-						results[index].errors = []CheckError{{Target: target, Code: "CANCELLED", Message: "Check cancelled."}}
+						results[index].errors = []CheckError{{Target: target, Code: "CANCELED", Message: "The check was canceled."}}
 					}
 					<-slot
 				case <-ctx.Done():
-					results[index].errors = []CheckError{{Target: target, Code: "CANCELLED", Message: "Check cancelled."}}
+					results[index].errors = []CheckError{{Target: target, Code: "CANCELED", Message: "The check was canceled."}}
 				}
 			}
 		}()
@@ -77,7 +77,7 @@ func Run(ctx context.Context, kind string, config Config, collector TargetCollec
 		GeneratedAt: now.Format(time.RFC3339Nano), Complete: true, Targets: config.Targets,
 		Findings: []Finding{}, Errors: []CheckError{}, Observations: []Observation{},
 		Context: map[string]any{"dns": config.DNS, "concurrency": config.Concurrency,
-			"maxTargets": 20, "timeoutMsPerPhase": config.TimeoutMS,
+			"maxTargets": MaxTargets, "timeoutMsPerPhase": config.TimeoutMS,
 			"scope": "Exact configured names; no crawling, subdomain enumeration or redirect following."}}
 	if kind == "recon" {
 		report.Context["scope"] = "DNS records for exact configured names. No HTTPS requests or subdomain enumeration."

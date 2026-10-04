@@ -6,7 +6,7 @@ import { normalizeTarget, validateConfig } from '../src/config.mjs';
 
 test('scope rejects credentials, ambiguous addresses, ports, wildcards and query tokens', () => {
   for (const target of ['http://company.com','https://user:pass@company.com','https://company.com?token=secret',
-    'https://company.com#token','https://company.com:8443','https://*.company.com','https://127.1','https://2130706433',
+    'https://company.com#token','https://company.com/?','https://company.com/#','https://company.com:8443','https://*.company.com','https://127.1','https://2130706433',
     'https://[::1]','https://localhost','https://company.com.','https://company.com\\@evil.com','https://company.com\n']) {
     assert.throws(()=>normalizeTarget(target),target);
   }

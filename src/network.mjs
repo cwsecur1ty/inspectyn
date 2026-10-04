@@ -104,14 +104,24 @@ export async function collectTarget(target, config, dependencies = {}) {
     ...(resolved.dns ? { dns: resolved.dns } : {}) };
 }
 
+const certificateDescriptions = {
+  CERT_HAS_EXPIRED: 'The TLS certificate has expired.', CERT_NOT_YET_VALID: 'The TLS certificate is not yet valid.',
+  ERR_TLS_CERT_ALTNAME_INVALID: 'The TLS certificate does not match the hostname.',
+  DEPTH_ZERO_SELF_SIGNED_CERT: 'The TLS certificate is self-signed and untrusted.', SELF_SIGNED_CERT_IN_CHAIN: 'The TLS certificate chain contains an untrusted self-signed certificate.',
+  UNABLE_TO_VERIFY_LEAF_SIGNATURE: 'The TLS certificate chain could not be verified.', UNABLE_TO_GET_ISSUER_CERT: 'The TLS certificate chain could not be verified.',
+  UNABLE_TO_GET_ISSUER_CERT_LOCALLY: 'The TLS certificate chain could not be verified.', CERT_UNTRUSTED: 'The TLS certificate chain could not be verified.',
+  CERT_SIGNATURE_FAILURE: 'The TLS certificate signature could not be verified.', CERT_REVOKED: 'The TLS certificate has been revoked.'
+};
+
+/** Node TLS verification codes that mean the served certificate failed validation. */
+export const CERTIFICATE_ERROR_CODES = new Set(Object.keys(certificateDescriptions));
+
 export function networkError(target,error) {
   const code = safeCode(error);
   const descriptions = {
     DESTINATION_BLOCKED: 'Private, reserved or unsupported destination blocked.', DNS_LOOKUP_FAILED: 'DNS address resolution was incomplete.',
     DNS_NO_ADDRESS: 'No A or AAAA address was returned.', ETIMEDOUT: 'The network operation timed out.',
-    CERT_HAS_EXPIRED: 'The TLS certificate has expired.', ERR_TLS_CERT_ALTNAME_INVALID: 'The TLS certificate does not match the hostname.',
-    DEPTH_ZERO_SELF_SIGNED_CERT: 'The TLS certificate is self-signed and untrusted.', UNABLE_TO_VERIFY_LEAF_SIGNATURE: 'The TLS certificate chain could not be verified.',
-    TLS_DESTINATION_MISMATCH: 'The connection did not meet the destination and TLS verification requirements.'
+    TLS_DESTINATION_MISMATCH: 'The connection did not meet the destination and TLS verification requirements.', ...certificateDescriptions
   };
   return { target,code,message: descriptions[code] ?? `Network check could not complete (${code}).` };
 }

@@ -8,7 +8,8 @@ export function normalizeTarget(value) {
   }
   let url;
   try { url = new URL(value); } catch { throw new Error('Targets must be complete HTTPS URLs.'); }
-  if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash || (url.port && url.port !== '443')) {
+  // URL drops empty "?" and "#" from search/hash, so check the raw input as the native scanner does.
+  if (url.protocol !== 'https:' || url.username || url.password || /[?#]/.test(value) || (url.port && url.port !== '443')) {
     throw new Error('Use HTTPS on port 443 without credentials, query strings or fragments.');
   }
   const hostname = url.hostname;
